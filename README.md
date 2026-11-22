@@ -11,7 +11,7 @@ Läuft komplett im Browser, ohne Konto, ohne Server, ohne Werbung.
 | **Stoppuhr** | Zählt hoch mit Zehntelsekunden |
 | **Uhr** | Digital oder analog, optional mit Sekunden und Datum |
 | **Agenda** | Stundenablauf – **zum Abhaken** (nächster offener Punkt wird hervorgehoben), als **Liste** oder **nummeriert**; jeder Punkt mit Emoji/Symbol. Im Bearbeiten-Modus: Enter = neuer Punkt, Alt+↑/↓ = verschieben |
-| **Text** | Arbeitsaufträge, Hausaufgaben, Notizen; Emojis/Symbole einfügen, Schriftgröße A−/A+, zentrieren |
+| **Text** | Editor mit Leiste (erscheint nur beim Schreiben): 7 Schriften, Überschriften, **fett**/*kursiv*/unterstrichen/durchgestrichen, Textfarbe, Textmarker, Aufzählung & Nummerierung (auch per `- ` bzw. `1. ` am Zeilenanfang), Einzug mit Tab, Ausrichtung, Emojis/Symbole, Zettelfarbe (Weiß, Gelb, Blau, Grün, Rosa, Tafel) |
 | **Bild** | Bild auswählen, hineinziehen oder einfach **Strg+V** auf der Fläche |
 | **QR-Code** | Link eingeben (optional mit Überschrift) → Schüler*innen scannen mit dem Tablet |
 
@@ -60,6 +60,8 @@ Diese Adresse kannst du am Schul-PC als Lesezeichen oder Startseite speichern.
 ```
 index.html            Seite
 css/style.css         Gestaltung
+css/fonts.css         Einbindung der lokalen Schriften
+fonts/                Schriftdateien (woff2) und Lizenzen
 js/core.js            Helfer: Symbole, Speicher, Ton, Bilder-Speicher
 js/backgrounds.js     Hintergrund-Illustrationen, Jahreszeit-Automatik, Effekte
 js/app.js             Arbeitsfläche, Werkzeugleiste, Hintergrund
@@ -69,6 +71,19 @@ js/widgets/*.js       Ein Werkzeug pro Datei
 
 Ein neues Werkzeug = eine neue Datei in `js/widgets/`, die `registerWidget(...)` aufruft,
 plus eine Zeile in `index.html` und der Name in `ORDER` in `js/app.js`.
+
+## Schriften
+
+Lokal eingebunden (`fonts/`, Lizenz SIL Open Font License, Texte in `fonts/licenses/`) – es wird nichts von Google geladen:
+
+| Schrift | Wofür |
+|---|---|
+| Andika | Leseanfänger: einstöckiges „a“, eindeutige I/l/1 |
+| Lexend | entwickelt für flüssiges Lesen |
+| Atkinson Hyperlegible | besonders gut unterscheidbare Zeichen (Sehbeeinträchtigung) |
+| Playpen Sans | Handschrift-Stil |
+| Source Serif 4 | Serifenschrift für längere Texte |
+| JetBrains Mono | Informatik & Code |
 
 ## Datenschutz
 

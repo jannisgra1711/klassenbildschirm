@@ -1,0 +1,5 @@
+# Schriften und Bilder nie als Text behandeln (keine Zeilenenden-Umwandlung)
+*.woff2 binary
+*.png   binary
+*.jpg   binary
+*.webp  binary

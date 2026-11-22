@@ -85,6 +85,15 @@ const ICONS = {
   star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',
+  listBullet: '<circle cx="5" cy="7" r="1.4" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1.4" fill="currentColor" stroke="none"/><path d="M9.5 7H20M9.5 12H20M9.5 17H20"/>',
+  listNumber: '<path d="M10 7H20M10 12H20M10 17H20"/><path d="M3.6 5.2L5 4.4V9.6M3.4 13.6c.4-1 2.8-1 2.8.4 0 1.2-2.8 1.8-2.8 3.4h3" stroke-width="1.5"/>',
+  indent: '<path d="M4 5h16M11 10h9M11 14h9M4 19h16M4 9l3.5 3L4 15"/>',
+  outdent: '<path d="M4 5h16M11 10h9M11 14h9M4 19h16M7.5 9L4 12l3.5 3"/>',
+  alignRight: '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
+  eraser: '<path d="M8 20h12M4.6 15.4l9-9a2 2 0 0 1 2.8 0l2.2 2.2a2 2 0 0 1 0 2.8L11 19H8.2z"/><path d="M9.5 10.5l5 5"/>',
+  highlighter: '<path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5L4 18l2 2 5.5-2.5"/>',
+  note: '<path d="M4 4h16v11l-5 5H4z"/><path d="M15 20v-5h5"/>',
+  caret: '<path d="M8 10l4 4 4-4"/>',
 };
 
 function icon(name) {
@@ -147,23 +156,54 @@ const EMOJI_SETS = [
   { name: 'Zeichen', items: '→ ⇒ ← ↑ ↓ ↔ ✓ ✗ • ★ ☆ ① ② ③ ④ ⑤ ⑥ ∑ ≈ ≠ ≤ ≥ ± × ÷ √ π ∞ ° € § ½ ¼ ¾ ² ³' },
 ].map(s => ({ ...s, items: s.items.split(' ') }));
 
-let activePicker = null;
+/* ---------- Aufklapp-Menü (Popover) ----------
+   Schwebt über allem, schließt bei Klick daneben oder Escape. Ein Klick
+   darin nimmt dem Texteditor weder Fokus noch Markierung weg. */
+let activePopover = null;
 
-function closeEmojiPicker() {
-  if (!activePicker) return;
-  activePicker.cleanup();
-  activePicker.pop.remove();
-  activePicker = null;
+function closePopover() {
+  if (!activePopover) return;
+  const p = activePopover;
+  activePopover = null;
+  p.cleanup();
+  p.pop.remove();
+  p.anchor.setAttribute('aria-expanded', 'false');
+}
+
+/** Öffnet `content` unter `anchor`. Zweiter Klick auf denselben Auslöser schließt. */
+function openPopover(anchor, content, { className = '', label = '' } = {}) {
+  if (activePopover?.anchor === anchor) { closePopover(); return null; }
+  closePopover();
+
+  const pop = el('div', { class: `popover ${className}`, role: 'dialog', 'aria-label': label }, content);
+  pop.addEventListener('mousedown', e => { if (!e.target.closest('input, select, textarea')) e.preventDefault(); });
+  document.body.append(pop);
+
+  // Unter (oder notfalls über) dem Auslöser platzieren
+  const r = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+  pop.style.left = clamp(r.left, 8, window.innerWidth - pw - 8) + 'px';
+  pop.style.top = top + 'px';
+
+  const onDown = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closePopover(); };
+  const onKey = e => { if (e.key === 'Escape') closePopover(); };
+  document.addEventListener('pointerdown', onDown, true);
+  document.addEventListener('keydown', onKey);
+  anchor.setAttribute('aria-expanded', 'true');
+  activePopover = {
+    anchor, pop,
+    cleanup() { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); },
+  };
+  return pop;
 }
 
 /** Öffnet die Auswahl unter `anchor`; onPick(symbol) – bei „Kein Symbol“ mit ''. */
 function openEmojiPicker(anchor, onPick, { allowNone = false } = {}) {
-  if (activePicker?.anchor === anchor) { closeEmojiPicker(); return; }
-  closeEmojiPicker();
-
   const tabs = el('div', { class: 'emoji-tabs', role: 'tablist' });
   const grid = el('div', { class: 'emoji-grid' });
-  const pick = sym => { closeEmojiPicker(); onPick(sym); };
+  const pick = sym => { closePopover(); onPick(sym); };
 
   function show(i) {
     openEmojiPicker.lastTab = i;
@@ -174,29 +214,11 @@ function openEmojiPicker(anchor, onPick, { allowNone = false } = {}) {
   }
   EMOJI_SETS.forEach((s, i) => tabs.append(el('button', { class: 'emoji-tab', type: 'button', role: 'tab', text: s.name, onclick: () => show(i) })));
 
-  const pop = el('div', { class: 'emoji-pop', role: 'dialog', 'aria-label': 'Symbol auswählen' }, [
+  show(openEmojiPicker.lastTab || 0);
+  openPopover(anchor, [
     tabs, grid,
     allowNone ? el('button', { class: 'emoji-none', type: 'button', text: 'Kein Symbol', onclick: () => pick('') }) : null,
-  ]);
-  document.body.append(pop);
-  show(openEmojiPicker.lastTab || 0);
-
-  // Unter (oder notfalls über) dem Auslöser platzieren
-  const r = anchor.getBoundingClientRect();
-  const pw = pop.offsetWidth, ph = pop.offsetHeight;
-  let top = r.bottom + 6;
-  if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
-  pop.style.left = clamp(r.left, 8, window.innerWidth - pw - 8) + 'px';
-  pop.style.top = top + 'px';
-
-  const onDown = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closeEmojiPicker(); };
-  const onKey = e => { if (e.key === 'Escape') closeEmojiPicker(); };
-  document.addEventListener('pointerdown', onDown, true);
-  document.addEventListener('keydown', onKey);
-  activePicker = {
-    anchor, pop,
-    cleanup() { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); },
-  };
+  ], { className: 'emoji-pop', label: 'Symbol auswählen' });
 }
 
 /* ---------- Bilder im Browser speichern (IndexedDB) ----------

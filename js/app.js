@@ -356,7 +356,7 @@
   }
 
   document.addEventListener('pointerdown', e => {
-    if (e.target.closest?.('.emoji-pop')) return;
+    if (e.target.closest?.('.popover')) return;
     for (const p of panels) {
       if (!p.panel.hidden && !p.panel.contains(e.target) && !p.btn.contains(e.target)) togglePanel(p, false);
     }
