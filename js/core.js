@@ -70,6 +70,21 @@ const ICONS = {
   sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   alignLeft: '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
   alignCenter: '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
+  list: '<path d="M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5"/><path d="M3.8 6.3l1.3 1.3 2.4-2.6M3.8 11.8l1.3 1.3 2.4-2.6"/><circle cx="5.3" cy="17.5" r="1" fill="currentColor"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  up: '<path d="M6 15l6-6 6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/>',
+  users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 6M17 14.2a5.5 5.5 0 0 1 3.5 5.3"/>',
+  doc: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+  pin: '<rect x="3" y="4" width="18" height="16" rx="2"/><rect x="6" y="7" width="5" height="5" rx=".6"/><rect x="13" y="7" width="5" height="4" rx=".6"/><rect x="6" y="14" width="5" height="3" rx=".6"/><rect x="13" y="13" width="5" height="4" rx=".6"/>',
+  board: '<rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21l4-4 4 4M7 13l3-4 3 3 4-5"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+  chart: '<path d="M5 20V11M12 20V5M19 20v-6M3 20h18"/>',
+  star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',
 };
 
 function icon(name) {
@@ -122,6 +137,66 @@ function settingsMenu({ tools, signal }, items) {
 
   tools.append(btn);
   head.append(menu);
+}
+
+/* ---------- Symbol-Auswahl (Emojis & Zeichen) ---------- */
+const EMOJI_SETS = [
+  { name: 'Unterricht', items: '📚 📖 ✏️ 📝 📐 📏 🧮 🔬 🧪 🌍 🗺️ 🎨 🎵 ⚽ 💻 📱 🧠 💡 🔍 📊 📋 🗂️ 📎 ✂️ 🖍️ 📓 🎭 🧩' },
+  { name: 'Ablauf', items: '👋 🗣️ 👂 👀 🤫 🙋 ✋ 🤝 👤 👥 🧑‍🏫 ⏰ ⏳ ☕ 🍎 🔔 🏁 🚀 🎯 📌 🔁 ➡️ 🏠 🚪 🎒 🧹 🔇 💬' },
+  { name: 'Feedback', items: '✅ ☑️ ❌ ⭐ 🌟 🏆 🥇 👍 👎 👏 🎉 💪 ❤️ 😀 🙂 😐 😕 🤔 😴 🤩 🔥 ⚠️ ❓ ❗ 🟢 🟡 🔴 🌈' },
+  { name: 'Zeichen', items: '→ ⇒ ← ↑ ↓ ↔ ✓ ✗ • ★ ☆ ① ② ③ ④ ⑤ ⑥ ∑ ≈ ≠ ≤ ≥ ± × ÷ √ π ∞ ° € § ½ ¼ ¾ ² ³' },
+].map(s => ({ ...s, items: s.items.split(' ') }));
+
+let activePicker = null;
+
+function closeEmojiPicker() {
+  if (!activePicker) return;
+  activePicker.cleanup();
+  activePicker.pop.remove();
+  activePicker = null;
+}
+
+/** Öffnet die Auswahl unter `anchor`; onPick(symbol) – bei „Kein Symbol“ mit ''. */
+function openEmojiPicker(anchor, onPick, { allowNone = false } = {}) {
+  if (activePicker?.anchor === anchor) { closeEmojiPicker(); return; }
+  closeEmojiPicker();
+
+  const tabs = el('div', { class: 'emoji-tabs', role: 'tablist' });
+  const grid = el('div', { class: 'emoji-grid' });
+  const pick = sym => { closeEmojiPicker(); onPick(sym); };
+
+  function show(i) {
+    openEmojiPicker.lastTab = i;
+    [...tabs.children].forEach((b, j) => b.setAttribute('aria-selected', String(i === j)));
+    grid.classList.toggle('is-symbols', EMOJI_SETS[i].name === 'Zeichen');
+    grid.replaceChildren(...EMOJI_SETS[i].items.map(sym =>
+      el('button', { type: 'button', text: sym, 'aria-label': sym, onclick: () => pick(sym) })));
+  }
+  EMOJI_SETS.forEach((s, i) => tabs.append(el('button', { class: 'emoji-tab', type: 'button', role: 'tab', text: s.name, onclick: () => show(i) })));
+
+  const pop = el('div', { class: 'emoji-pop', role: 'dialog', 'aria-label': 'Symbol auswählen' }, [
+    tabs, grid,
+    allowNone ? el('button', { class: 'emoji-none', type: 'button', text: 'Kein Symbol', onclick: () => pick('') }) : null,
+  ]);
+  document.body.append(pop);
+  show(openEmojiPicker.lastTab || 0);
+
+  // Unter (oder notfalls über) dem Auslöser platzieren
+  const r = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 6);
+  pop.style.left = clamp(r.left, 8, window.innerWidth - pw - 8) + 'px';
+  pop.style.top = top + 'px';
+
+  const onDown = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closeEmojiPicker(); };
+  const onKey = e => { if (e.key === 'Escape') closeEmojiPicker(); };
+  document.addEventListener('pointerdown', onDown, true);
+  document.addEventListener('keydown', onKey);
+  activePicker = {
+    anchor, pop,
+    cleanup() { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); },
+  };
 }
 
 /* ---------- Bilder im Browser speichern (IndexedDB) ----------

@@ -10,11 +10,24 @@ Läuft komplett im Browser, ohne Konto, ohne Server, ohne Werbung.
 | **Timer** | Countdown mit Fortschrittsring, Schnellwahl (1–20 min), Zeit per Klick auf die Ziffern eintippen (`5` = 5 Minuten, `2:30`), Gong am Ende |
 | **Stoppuhr** | Zählt hoch mit Zehntelsekunden |
 | **Uhr** | Digital oder analog, optional mit Sekunden und Datum |
-| **Text** | Arbeitsaufträge, Hausaufgaben, Notizen; Schriftgröße A−/A+, zentrieren |
+| **Agenda** | Stundenablauf – **zum Abhaken** (nächster offener Punkt wird hervorgehoben), als **Liste** oder **nummeriert**; jeder Punkt mit Emoji/Symbol. Im Bearbeiten-Modus: Enter = neuer Punkt, Alt+↑/↓ = verschieben |
+| **Text** | Arbeitsaufträge, Hausaufgaben, Notizen; Emojis/Symbole einfügen, Schriftgröße A−/A+, zentrieren |
 | **Bild** | Bild auswählen, hineinziehen oder einfach **Strg+V** auf der Fläche |
-| **QR-Code** | Link eingeben → Schüler*innen scannen mit dem Tablet |
+| **QR-Code** | Link eingeben (optional mit Überschrift) → Schüler*innen scannen mit dem Tablet |
 
-Außerdem: Hintergründe (Verläufe, eigene Farbe, eigenes Foto), **Vollbild** (die Leiste blendet sich nach 3 s aus und erscheint wieder, wenn du die Maus bewegst).
+**Menü „Gemeinsam“:** Sammlung bewährter Werkzeuge für Zusammenarbeit (Dokumente, Pinnwände,
+Whiteboards, Brainstorming, Umfragen, Quiz), eigene Links (z. B. Schul-Cloud, Moodle) und
+„Für die Klasse anzeigen“: Teilen-Link einfügen → großer QR-Code mit Überschrift.
+Bitte vor dem Einsatz externer Angebote die Datenschutzvorgaben der Schule prüfen.
+
+**Hintergründe** (alle selbst gezeichnet, laden nichts aus dem Internet):
+- **Automatisch nach Jahreszeit** (Standard): Frühling (ab 20.3.), Ostern (Palmsonntag bis eine Woche nach Ostern),
+  Sommer (ab 21.6.), Herbst (ab 23.9.), Advent & Weihnachten (1. Advent bis 6.1.), Winter (ab 7.1.)
+- **Schule:** Kreidetafel, Karopapier, Heftlinien, Pinnwand, Schulsachen (hell/dunkel)
+- Farben & Verläufe, eigene Farbe, eigenes Foto
+- Optional **bewegte Effekte**: Schnee, fallende Blätter, Blüten – je nach Hintergrund
+
+**Vollbild:** Die Leiste blendet sich nach 3 s aus und erscheint wieder, wenn du die Maus bewegst.
 
 Alle Werkzeuge lassen sich an der Kopfzeile verschieben und an der unteren rechten Ecke vergrößern.
 Alles wird automatisch im Browser gespeichert – nach dem Neuladen ist der Bildschirm wieder genau so da, auch ein laufender Timer.
@@ -48,7 +61,9 @@ Diese Adresse kannst du am Schul-PC als Lesezeichen oder Startseite speichern.
 index.html            Seite
 css/style.css         Gestaltung
 js/core.js            Helfer: Symbole, Speicher, Ton, Bilder-Speicher
+js/backgrounds.js     Hintergrund-Illustrationen, Jahreszeit-Automatik, Effekte
 js/app.js             Arbeitsfläche, Werkzeugleiste, Hintergrund
+js/collab.js          Menü „Gemeinsam“ (Werkzeugliste hier anpassbar)
 js/widgets/*.js       Ein Werkzeug pro Datei
 ```
 

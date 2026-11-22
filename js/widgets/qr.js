@@ -31,7 +31,7 @@ registerWidget('qr', {
   accent: '#3d4451',
   size: { w: 320, h: 390 },
   min: { w: 190, h: 200 },
-  data: () => ({ text: '', caption: true }),
+  data: () => ({ text: '', caption: true, title: '' }),
 
   mount({ body, tools, data, save, signal }) {
     const view = el('div', { class: 'qr-view' });
@@ -42,9 +42,15 @@ registerWidget('qr', {
         class: 'field', type: 'text', id: 'qr-' + uid(), value: data.text,
         placeholder: 'https://…', autocomplete: 'off', spellcheck: 'false',
       });
+      const title = el('input', {
+        class: 'field', type: 'text', id: 'qrt-' + uid(), value: data.title,
+        placeholder: 'z. B. Pinnwand Klimawandel', autocomplete: 'off',
+      });
       const form = el('form', { class: 'qr-form' }, [
         el('label', { for: input.id, text: 'Link oder Text für den QR-Code' }),
         input,
+        el('label', { for: title.id, text: 'Überschrift (optional)' }),
+        title,
         el('button', { class: 'btn btn-primary', type: 'submit', html: icon('qr') + '<span>Erzeugen</span>' }),
       ]);
       form.addEventListener('submit', e => {
@@ -52,6 +58,7 @@ registerWidget('qr', {
         const text = input.value.trim();
         if (!text) { input.focus(); return; }
         data.text = text;
+        data.title = title.value.trim();
         save();
         showCode();
       });
@@ -70,7 +77,9 @@ registerWidget('qr', {
         showForm(true);
         return;
       }
-      const parts = [el('div', { class: 'qr-box', html: svg })];
+      const parts = [];
+      if (data.title) parts.push(el('div', { class: 'qr-title', text: data.title }));
+      parts.push(el('div', { class: 'qr-box', html: svg }));
       if (data.caption) parts.push(el('div', { class: 'qr-caption', text: prettyLink(data.text), title: data.text }));
       view.replaceChildren(...parts);
     }
