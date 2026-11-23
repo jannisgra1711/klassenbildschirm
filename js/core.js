@@ -99,6 +99,7 @@ const ICONS = {
   right: '<path d="M9 5l7 7-7 7"/>',
   shapes: '<rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M15.5 13.5l5 7h-10z"/>',
   layers: '<path d="M12 4l9 5-9 5-9-5z"/><path d="M3 14l9 5 9-5"/>',
+  download: '<path d="M12 4v11.5M7.5 11L12 15.5 16.5 11M4.5 15v4.5h15V15"/>',
 };
 
 function icon(name) {
@@ -253,8 +254,52 @@ const ImageDB = (() => {
     async put(blob) { const id = uid(); await run('readwrite', s => s.put(blob, id)); return id; },
     get: id => run('readonly', s => s.get(id)),
     del: id => run('readwrite', s => s.delete(id)),
+    keys: () => run('readonly', s => s.getAllKeys()),
   };
 })();
+
+/* ---------- Schutz vor eingeschleustem Code ----------
+   Inhalte können aus fremden Sicherungsdateien stammen. Formatierter Text
+   wird daher auf harmlose Tags und Stilangaben reduziert. */
+const SAFE_TAGS = new Set(['DIV', 'P', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'SPAN', 'FONT', 'UL', 'OL', 'LI', 'H2', 'H3', 'BLOCKQUOTE']);
+const SAFE_STYLES = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration', 'text-decoration-line', 'text-align', 'margin-left', 'padding-left'];
+
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+  const clean = node => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === Node.TEXT_NODE) continue;
+      if (child.nodeType !== Node.ELEMENT_NODE || !SAFE_TAGS.has(child.tagName)) {
+        // Unbekanntes Element: Inhalt als Text behalten, Element entfernen
+        if (child.nodeType === Node.ELEMENT_NODE && !/^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|TEMPLATE|SVG|MATH)$/.test(child.tagName)) {
+          child.replaceWith(...[...child.childNodes]);
+          clean(node); // Ersetzte Kinder erneut prüfen
+          return;
+        }
+        child.remove();
+        continue;
+      }
+      const style = child.style;
+      const kept = SAFE_STYLES
+        .map(p => [p, style.getPropertyValue(p)])
+        .filter(([, v]) => v && !/url\s*\(|expression|javascript:/i.test(v));
+      for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
+      kept.forEach(([p, v]) => child.style.setProperty(p, v));
+      clean(child);
+    }
+  };
+  clean(doc.body);
+  return doc.body.innerHTML;
+}
+
+/** Nur echte Farbwerte zulassen (#rgb, #rrggbb, rgb(…)). Sonst Ersatzwert. */
+function safeColor(value, fallback = null) {
+  const v = String(value ?? '').trim();
+  return /^#[0-9a-f]{3,8}$/i.test(v) || /^rgba?\([\d\s.,%]+\)$/i.test(v) ? v : fallback;
+}
+
+/** Nur Webadressen (http/https) als Link zulassen. */
+const isWebUrl = url => /^https?:\/\//i.test(String(url || '').trim());
 
 /** Große Fotos verkleinern, damit der Speicher nicht vollläuft. */
 async function shrinkImage(file, maxSide = 2000) {

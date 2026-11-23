@@ -63,7 +63,10 @@ function normalizeUrl(raw) {
  * opts = { state, save, addWidget(type, data), close() }
  */
 function buildCollabPanel(panel, { state, save, addWidget, close }) {
-  if (!Array.isArray(state.collabLinks)) state.collabLinks = [];
+  // Nur echte Webadressen behalten (Schutz bei geladenen Sicherungsdateien)
+  state.collabLinks = (Array.isArray(state.collabLinks) ? state.collabLinks : [])
+    .filter(l => l && isWebUrl(l.url))
+    .map(l => ({ id: String(l.id || uid()), name: String(l.name || l.url), url: String(l.url).trim() }));
 
   /* --- „Für die Klasse anzeigen“ --- */
   const linkInput = el('input', { class: 'field', type: 'text', id: 'collab-link', placeholder: 'Link einfügen (Strg+V)', autocomplete: 'off', spellcheck: 'false' });

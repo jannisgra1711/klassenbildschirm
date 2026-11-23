@@ -53,7 +53,7 @@ registerWidget('text', {
       class: 'x-text', contenteditable: 'true', spellcheck: 'true', lang: 'de',
       'data-placeholder': 'Hier tippen …', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Text',
     });
-    edit.innerHTML = data.html;
+    edit.innerHTML = sanitizeHtml(data.html);
     const bar = el('div', { class: 'x-bar', role: 'toolbar', 'aria-label': 'Textformatierung' });
     body.append(bar, edit);
 

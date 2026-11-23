@@ -43,7 +43,11 @@ Bitte vor dem Einsatz externer Angebote die Datenschutzvorgaben der Schule prüf
 Alle Werkzeuge lassen sich an der Kopfzeile verschieben und an der unteren rechten Ecke vergrößern.
 Alles wird automatisch im Browser gespeichert – nach dem Neuladen ist der Bildschirm wieder genau so da, auch ein laufender Timer.
 
-> Hinweis: Gespeichert wird **pro Browser und Gerät**. Am Schul-PC und zu Hause sind es also zwei getrennte Bildschirme.
+> Hinweis: Gespeichert wird **pro Browser und Gerät**. Am Schul-PC und zu Hause sind es also zwei getrennte Stände.
+> Deshalb gibt es **Sichern & Laden** (Bildschirm-Übersicht, Klick auf die Zahl unten links):
+> „Sichern“ speichert alle Bildschirme samt Bildern als eine `.json`-Datei (USB-Stick, Schul-Cloud).
+> „Laden“ holt sie zurück – wahlweise **zusätzlich** zu den vorhandenen Bildschirmen oder als **Ersatz**.
+> Viele Schulrechner löschen den Browser-Speicher beim Abmelden: dort also vor dem Abmelden sichern.
 
 ## Lokal ausprobieren
 
@@ -55,16 +59,50 @@ python -m http.server 5173
 
 Dann im Browser `http://localhost:5173` öffnen.
 
-## Kostenlos online stellen (GitHub Pages)
+## Kostenlos online stellen
+
+Die Seite ist rein statisch (HTML, CSS, JavaScript, ca. 600 KB) – jeder einfache Webspace genügt.
+
+### Variante A: Codeberg Pages (empfohlen, Server in der EU)
+
+[Codeberg](https://codeberg.org) wird von einem gemeinnützigen Verein in Berlin betrieben.
+
+1. Auf codeberg.org ein kostenloses Konto anlegen.
+2. Neues **öffentliches** Repository mit dem Namen **`pages`** erstellen (leer, ohne README).
+3. Im Repository unter **Settings → Webhooks → Add webhook** den Eintrag **git-pages** wählen,
+   die vorgegebene Ziel-Adresse lassen und **Add webhook** klicken.
+4. Diesen Ordner in den Branch **`pages`** hochladen (Codeberg veröffentlicht nur diesen Branch):
+   ```powershell
+   git remote add origin https://codeberg.org/<dein-name>/pages.git
+   ```
+   ```powershell
+   git push -u origin main:pages
+   ```
+5. Erreichbar unter `https://<dein-name>.codeberg.page/`. Spätere Änderungen wieder mit `git push origin main:pages`.
+
+(Stand: Codeberg Pages mit dem neuen „git-pages“-System. Details: docs.codeberg.org/codeberg-pages)
+
+### Variante B: GitHub Pages
 
 1. Auf [github.com](https://github.com) ein kostenloses Konto anlegen.
-2. Neues Repository erstellen, z. B. `klassenbildschirm` (öffentlich).
-3. Diesen Ordner hochladen (per „Add file → Upload files“ oder mit `git push`).
+2. Neues **öffentliches** Repository erstellen, z. B. `klassenbildschirm`.
+3. Hochladen:
+   ```powershell
+   git remote add origin https://github.com/<dein-name>/klassenbildschirm.git
+   ```
+   ```powershell
+   git push -u origin main
+   ```
 4. Im Repository: **Settings → Pages → Source: „Deploy from a branch“**, Branch `main`, Ordner `/ (root)` → Save.
-5. Nach ca. einer Minute ist die Seite erreichbar unter
-   `https://<dein-name>.github.io/klassenbildschirm/`
+5. Nach ca. einer Minute erreichbar unter `https://<dein-name>.github.io/klassenbildschirm/`
 
-Diese Adresse kannst du am Schul-PC als Lesezeichen oder Startseite speichern.
+### Variante C: Schulserver
+
+Den Inhalt dieses Ordners (ohne `.git`) in einen Webspace der Schule kopieren (IServ, Schul-Homepage …) –
+die Schul-IT weiß, wohin.
+
+**Danach:** Die Adresse am Schul-PC als Lesezeichen oder Startseite speichern.
+Spätere Änderungen sind mit `git push` wieder online.
 
 ## Aufbau
 
@@ -77,6 +115,8 @@ js/core.js            Helfer: Symbole, Speicher, Ton, Bilder-Speicher
 js/backgrounds.js     Hintergrund-Illustrationen, Jahreszeit-Automatik, Effekte
 js/app.js             Arbeitsfläche, Werkzeugleiste, Hintergrund
 js/collab.js          Menü „Gemeinsam“ (Werkzeugliste hier anpassbar)
+js/backup.js          Sichern & Laden als Datei
+vendor/               QR-Code-Bibliothek (MIT) mit Lizenz
 js/widgets/*.js       Ein Werkzeug pro Datei
 ```
 
@@ -99,5 +139,10 @@ Lokal eingebunden (`fonts/`, Lizenz SIL Open Font License, Texte in `fonts/licen
 ## Datenschutz
 
 Es werden keine Daten an einen Server geschickt. Texte, Bilder und Einstellungen liegen ausschließlich
-im Browser-Speicher des jeweiligen Geräts. Einzige externe Anfrage: die QR-Code-Bibliothek
-(`qrcode-generator`, MIT-Lizenz) wird von cdnjs.cloudflare.com geladen.
+im Browser-Speicher des jeweiligen Geräts (bzw. in den Sicherungsdateien, die du selbst speicherst).
+Die Seite lädt **nichts von fremden Servern**: Schriften und die QR-Code-Bibliothek
+(`qrcode-generator`, MIT-Lizenz, `vendor/`) liegen im Projekt. Nur die Links im Menü „Gemeinsam“
+führen – wenn du sie anklickst – zu externen Angeboten.
+
+Geladene Sicherungsdateien werden geprüft: Formatierter Text wird auf harmlose Formatierungen
+reduziert, Farben und Links müssen gültig sein. So kann auch eine Datei aus fremder Hand keinen Code einschleusen.

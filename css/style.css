@@ -595,6 +595,11 @@ body[data-tone="light"] .empty-hint { color: rgba(20, 25, 35, .82); text-shadow:
 .sc-name:focus { outline: none; background: var(--card); box-shadow: 0 0 0 2px var(--ink-3); }
 .sc-main small { padding-left: 4px; font-size: 12px; color: var(--ink-3); }
 .sc-add { --accent: #1b2130; }
+.sc-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.sc-file { display: flex; gap: 6px; }
+.sc-file .btn { height: 40px; padding: 0 14px; font-size: 14px; }
+.sc-tip { margin: 12px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.sc-choice { display: flex; flex-direction: column; gap: 8px; }
 body.idle { cursor: none; }
 body.idle .dock { opacity: 0; transform: translate(-50%, 24px); pointer-events: none; }
 @media (max-width: 640px) { .dock-btn { min-width: 58px; } }

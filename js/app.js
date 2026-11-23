@@ -33,8 +33,10 @@
 
   const state = loadState();
   let saveWarned = false;
+  let saveSuppressed = false; // während eine Sicherung geladen wird
 
   function saveNow() {
+    if (saveSuppressed) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -364,7 +366,7 @@
     const bg = state.background || { kind: 'auto' };
     let css = null, light = false, fx = null;
     if (bg.kind === 'color') {
-      css = bg.color; light = isLight(bg.color);
+      css = safeColor(bg.color, '#4a6fa5'); light = isLight(css);
     } else if (bg.kind === 'image') {
       const blob = await ImageDB.get(bg.imageId).catch(() => null);
       if (blob) {
@@ -575,8 +577,75 @@
       el('h2', { text: 'Bildschirme' }),
       el('p', { class: 'sc-hint', text: 'Wie Folien einer Präsentation: Blättern mit ◀ ▶, den Pfeiltasten oder Bild↑/Bild↓ (auch mit einem Presenter).' }),
       el('ol', { class: 'sc-list' }, rows),
-      el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Neuer Bildschirm</span>', onclick: addScreen }),
+      el('div', { class: 'sc-foot' }, [
+        el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Neuer Bildschirm</span>', onclick: addScreen }),
+        el('div', { class: 'sc-file' }, [
+          el('button', { class: 'btn', type: 'button', title: 'Alle Bildschirme als Datei speichern', html: icon('download') + '<span>Sichern</span>', onclick: doExport }),
+          el('button', { class: 'btn', type: 'button', title: 'Gesicherte Datei laden', html: icon('upload') + '<span>Laden</span>', onclick: doImport }),
+        ]),
+      ]),
+      el('p', { class: 'sc-tip', text: 'Tipp: Am Schul-PC vor dem Abmelden sichern – manche Schulrechner löschen den Browser-Speicher. Mit der Datei nimmst du deine Stunden auch nach Hause mit.' }),
     );
+  }
+
+  /* ---------- Sichern & Laden ---------- */
+  async function doExport() {
+    try {
+      saveNow();
+      const r = await exportBackup(state);
+      toast(`Gesichert: ${r.name}`);
+    } catch (err) {
+      console.error(err);
+      toast('Sichern hat nicht geklappt.');
+    }
+  }
+
+  async function doImport() {
+    const file = await pickFile('.json,application/json');
+    if (!file) return;
+    let data;
+    try { data = await readBackup(file); } catch (err) { toast(err.message); return; }
+    const n = data.state.screens.length;
+    const when = data.exportedAt ? `, gesichert am ${new Date(data.exportedAt).toLocaleDateString('de-DE')}` : '';
+    togglePanel(panels.find(p => p.panel === screensPanel), true);
+    screensPanel.replaceChildren(
+      el('h2', { text: 'Sicherung laden' }),
+      el('p', { class: 'sc-hint', text: `„${file.name}“ enthält ${n === 1 ? '1 Bildschirm' : `${n} Bildschirme`}${when}.` }),
+      el('div', { class: 'sc-choice' }, [
+        el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Zu meinen Bildschirmen hinzufügen</span>', onclick: () => finishImport(data, 'add') }),
+        el('button', {
+          class: 'btn', type: 'button', html: icon('reset') + '<span>Alles ersetzen</span>',
+          onclick: () => { if (confirm('Alle aktuellen Bildschirme werden durch die Sicherung ersetzt. Fortfahren?')) finishImport(data, 'replace'); },
+        }),
+        el('button', { class: 'btn', type: 'button', text: 'Abbrechen', onclick: renderScreensPanel }),
+      ]),
+    );
+  }
+
+  async function finishImport(data, mode) {
+    let next;
+    try { next = await stateFromBackup(data, state, mode); } catch (err) {
+      console.error(err);
+      toast('Die Sicherung konnte nicht geladen werden.');
+      return;
+    }
+    const newImages = next._newImages || [];
+    delete next._newImages;
+    saveSuppressed = true; // der alte Stand darf den neuen nicht mehr überschreiben
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      saveSuppressed = false;
+      newImages.forEach(id => ImageDB.del(id).catch(() => {}));
+      toast('Nicht genug Speicherplatz im Browser für diese Sicherung.');
+      return;
+    }
+    if (mode === 'replace') { // nicht mehr benötigte Bilder aufräumen
+      const keep = backupImageIds(next);
+      const all = await ImageDB.keys().catch(() => []);
+      await Promise.all(all.filter(id => !keep.has(id)).map(id => ImageDB.del(id).catch(() => {})));
+    }
+    location.reload();
   }
 
   document.addEventListener('pointerdown', e => {

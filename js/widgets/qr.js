@@ -69,7 +69,7 @@ registerWidget('qr', {
 
     function showCode() {
       if (typeof qrcode !== 'function') {
-        view.replaceChildren(el('p', { class: 'w-note', text: 'QR-Codes brauchen beim ersten Laden eine Internetverbindung. Bitte Seite neu laden, sobald du online bist.' }));
+        view.replaceChildren(el('p', { class: 'w-note', text: 'Die QR-Code-Bibliothek fehlt (vendor/qrcode-generator/qrcode.js). Bitte Seite neu laden.' }));
         return;
       }
       let svg;

@@ -45,7 +45,8 @@ function autoInk(fill) {
 
 /** SVG-Form passend zur echten Größe (Ecken bleiben rund, nichts wird verzerrt). */
 function shapeSvg(d, w, h) {
-  const sw = d.strokeWidth || 0, s = sw / 2;
+  const sw = clamp(Number(d.strokeWidth) || 0, 0, 40), s = sw / 2;
+  const fill = safeColor(d.fill, 'none'), strokeColor = safeColor(d.stroke, '#1e293b');
   const R = (x) => Math.round(x * 10) / 10;
   let inner = '';
   switch (d.kind) {
@@ -91,8 +92,8 @@ function shapeSvg(d, w, h) {
       break;
     }
   }
-  const stroke = sw ? `stroke='${d.stroke}' stroke-width='${sw}'` : `stroke='none'`;
-  return `<svg width='${w}' height='${h}' viewBox='0 0 ${w} ${h}' aria-hidden='true'><g fill='${d.fill || 'none'}' ${stroke} stroke-linejoin='round'>${inner}</g></svg>`;
+  const stroke = sw ? `stroke='${strokeColor}' stroke-width='${sw}'` : `stroke='none'`;
+  return `<svg width='${w}' height='${h}' viewBox='0 0 ${w} ${h}' aria-hidden='true'><g fill='${fill}' ${stroke} stroke-linejoin='round'>${inner}</g></svg>`;
 }
 
 /** Text in einem Element per Doppelklick (oder Stift-Knopf) bearbeitbar machen. */
@@ -152,7 +153,7 @@ registerWidget('shape', {
       startEdit = editableText(text, () => data.text, v => { data.text = v; save(); }, 'Doppelklick zum Schreiben');
       redraw = () => {
         const c = kindOf();
-        box.style.setProperty('--c', data.fill || c.color);
+        box.style.setProperty('--c', safeColor(data.fill, c.color));
         symbol.textContent = c.symbol;
         if (!data.title && document.activeElement !== title) title.textContent = c.title;
         text.style.fontSize = data.fontSize + 'px';
