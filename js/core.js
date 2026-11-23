@@ -94,6 +94,11 @@ const ICONS = {
   highlighter: '<path d="M14.5 4.5l5 5-8 8-5-5z"/><path d="M6.5 12.5L4 18l2 2 5.5-2.5"/>',
   note: '<path d="M4 4h16v11l-5 5H4z"/><path d="M15 20v-5h5"/>',
   caret: '<path d="M8 10l4 4 4-4"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>',
+  left: '<path d="M15 5l-7 7 7 7"/>',
+  right: '<path d="M9 5l7 7-7 7"/>',
+  shapes: '<rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M15.5 13.5l5 7h-10z"/>',
+  layers: '<path d="M12 4l9 5-9 5-9-5z"/><path d="M3 14l9 5 9-5"/>',
 };
 
 function icon(name) {

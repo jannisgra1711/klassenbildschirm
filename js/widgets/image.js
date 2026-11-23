@@ -9,7 +9,9 @@ registerWidget('image', {
   min: { w: 160, h: 120 },
   data: () => ({ imageId: null, fit: 'contain' }),
 
-  mount({ node, body, tools, data, save, signal }) {
+  duplicable: true,
+
+  mount({ node, body, tools, data, save, signal, releaseImage }) {
     const view = el('div', { class: 'img-view' });
     body.append(view);
     let objectUrl = null;
@@ -37,8 +39,9 @@ registerWidget('image', {
       if (!file.type.startsWith('image/')) { toast('Das ist keine Bilddatei.'); return; }
       try {
         const id = await ImageDB.put(await shrinkImage(file, 2000));
-        if (data.imageId) ImageDB.del(data.imageId).catch(() => {});
+        const old = data.imageId;
         data.imageId = id;
+        releaseImage(old); // nur löschen, wenn kein anderes (dupliziertes) Bild es noch nutzt
         save();
         show();
       } catch (err) {
@@ -75,9 +78,5 @@ registerWidget('image', {
       useFile,
       destroy() { if (objectUrl) URL.revokeObjectURL(objectUrl); },
     };
-  },
-
-  onRemove(data) {
-    if (data.imageId) ImageDB.del(data.imageId).catch(() => {});
   },
 });

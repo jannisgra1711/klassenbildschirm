@@ -44,6 +44,7 @@ registerWidget('text', {
   size: { w: 540, h: 330 },
   min: { w: 220, h: 130 },
   data: () => ({ html: '', size: 36, align: 'left', font: 'system', note: 'white' }),
+  duplicable: true,
 
   mount({ node, body, data, save, signal }) {
     try { document.execCommand('styleWithCSS', false, true); } catch { /* alte Browser */ }

@@ -1,25 +1,37 @@
 'use strict';
 
 /* =====================================================================
-   App: Arbeitsfläche, Werkzeugleiste, Hintergrund, Speichern.
+   App: Bildschirme (wie Folien), Arbeitsfläche, Werkzeugleiste,
+   Hintergrund, Speichern.
    ===================================================================== */
 (() => {
   const STORAGE_KEY = 'klassenbildschirm.v1';
   const ORDER = ['timer', 'stopwatch', 'clock', 'agenda', 'text', 'image', 'qr'];
 
   /* ---------- Zustand laden & speichern ---------- */
+  const renumber = screen => screen.widgets
+    .sort((a, b) => (a.z || 0) - (b.z || 0))
+    .forEach((w, i) => { w.z = i + 1; });
+
   function loadState() {
     let s = null;
     try { s = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { /* beschädigt → neu */ }
-    if (!s || !Array.isArray(s.widgets)) s = { background: { kind: 'auto' }, widgets: [] };
-    s.widgets = s.widgets.filter(w => Widgets[w.type]);
-    // Stapelreihenfolge neu durchnummerieren, damit z-Werte klein bleiben
-    s.widgets.sort((a, b) => (a.z || 0) - (b.z || 0)).forEach((w, i) => { w.z = i + 1; });
+    if (!s || typeof s !== 'object') s = {};
+    // Ältere Version: eine einzige Fläche → wird Bildschirm 1
+    if (!Array.isArray(s.screens) || !s.screens.length) {
+      s.screens = [{ id: uid(), name: 'Bildschirm 1', widgets: Array.isArray(s.widgets) ? s.widgets : [] }];
+    }
+    delete s.widgets;
+    s.background ||= { kind: 'auto' };
+    for (const screen of s.screens) {
+      screen.widgets = (screen.widgets || []).filter(w => Widgets[w.type]);
+      renumber(screen);
+    }
+    s.current = clamp(s.current | 0, 0, s.screens.length - 1);
     return s;
   }
 
   const state = loadState();
-  let topZ = state.widgets.length;
   let saveWarned = false;
 
   function saveNow() {
@@ -32,61 +44,121 @@
   const save = debounce(saveNow, 250);
   window.addEventListener('pagehide', saveNow);
 
+  const currentScreen = () => state.screens[state.current];
+  const maxZ = screen => screen.widgets.reduce((m, w) => Math.max(m, w.z || 0), 0);
+
+  function findWidget(id) {
+    for (const screen of state.screens) {
+      const index = screen.widgets.findIndex(w => w.id === id);
+      if (index >= 0) return { screen, index, w: screen.widgets[index] };
+    }
+    return null;
+  }
+
+  /** Bild aus dem Speicher löschen – aber nur, wenn es nirgends mehr benutzt wird. */
+  function releaseImage(id) {
+    if (!id) return;
+    const used = state.background?.imageId === id ||
+      state.screens.some(s => s.widgets.some(w => w.data?.imageId === id));
+    if (!used) ImageDB.del(id).catch(() => {});
+  }
+
   /* ---------- Arbeitsfläche ---------- */
   const board = $('#board');
   const emptyHint = $('#empty-hint');
-  const live = new Map(); // id → { node, inst, ac }
+  const live = new Map();   // Werkzeug-ID → { node, inst, ac }
+  const layers = new Map(); // Bildschirm-ID → Ebene im DOM
 
-  function updateEmpty() { emptyHint.hidden = state.widgets.length > 0; }
+  function layerFor(screen) {
+    let layer = layers.get(screen.id);
+    if (!layer) {
+      layer = el('div', { class: 'screen', 'data-id': screen.id });
+      board.append(layer);
+      layers.set(screen.id, layer);
+    }
+    return layer;
+  }
+
+  function updateEmpty() { emptyHint.hidden = currentScreen().widgets.length > 0; }
+
+  /** Position & Größe, angepasst an den sichtbaren Bereich (Kopfzeile bleibt greifbar).
+      Ändert die gespeicherten Werte NICHT – ein kleines oder (beim Start) noch
+      unsichtbares Fenster darf das gespeicherte Layout nicht zerstören. */
+  function fitted(w) {
+    const def = Widgets[w.type];
+    const vw = Math.max(window.innerWidth, 480), vh = Math.max(window.innerHeight, 320);
+    const ww = Math.round(clamp(w.w, def.min.w, Math.max(def.min.w, vw - 16)));
+    const hh = Math.round(clamp(w.h, def.min.h, Math.max(def.min.h, vh - 16)));
+    return {
+      w: ww, h: hh,
+      x: Math.round(clamp(w.x, 80 - ww, vw - 80)),
+      y: Math.round(clamp(w.y, 0, vh - 44)),
+    };
+  }
 
   function place(w, node) {
-    node.style.left = w.x + 'px';
-    node.style.top = w.y + 'px';
-    node.style.width = w.w + 'px';
-    node.style.height = w.h + 'px';
+    const g = fitted(w);
+    node.style.left = g.x + 'px';
+    node.style.top = g.y + 'px';
+    node.style.width = g.w + 'px';
+    node.style.height = g.h + 'px';
     node.style.zIndex = w.z;
   }
 
-  /** Werkzeug im sichtbaren Bereich halten (Kopfzeile muss greifbar bleiben). */
-  function keepInView(w) {
-    const def = Widgets[w.type];
-    const vw = window.innerWidth, vh = window.innerHeight;
-    w.w = Math.round(clamp(w.w, def.min.w, Math.max(def.min.w, vw - 16)));
-    w.h = Math.round(clamp(w.h, def.min.h, Math.max(def.min.h, vh - 16)));
-    w.x = Math.round(clamp(w.x, 80 - w.w, vw - 80));
-    w.y = Math.round(clamp(w.y, 0, vh - 44));
-  }
+  /** Nur bei eigenen Aktionen (Ziehen, Größe ändern): Werte wirklich übernehmen. */
+  const keepInView = w => Object.assign(w, fitted(w));
 
   function bringToFront(w, node) {
-    if (w.z === topZ) return;
-    w.z = ++topZ;
+    const screen = findWidget(w.id)?.screen;
+    if (!screen || w.z === maxZ(screen)) return;
+    w.z = maxZ(screen) + 1;
     node.style.zIndex = w.z;
     save();
   }
 
-  /** Ziehen per Maus, Stift oder Finger. */
+  /** Ebene ändern: 'front' = ganz nach vorne, 'back' = ganz nach hinten. */
+  function setLayer(w, where) {
+    const screen = findWidget(w.id)?.screen;
+    if (!screen) return;
+    w.z = where === 'back' ? -1 : maxZ(screen) + 1;
+    renumber(screen);
+    screen.widgets.forEach(x => { const e = live.get(x.id); if (e) e.node.style.zIndex = x.z; });
+    save();
+  }
+
+  /** Ziehen per Maus, Stift oder Finger. Beginnt erst ab 3 px Bewegung,
+      damit Klicks und Doppelklicks (z. B. Text bearbeiten) normal ankommen. */
   function makeDraggable(handle, w, node, apply) {
     handle.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button, input, a, .w-menu')) return;
+      if (e.button !== 0 || e.target.closest('button, input, a, .w-menu, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
       e.preventDefault();
-      handle.setPointerCapture(e.pointerId);
-      const sx = e.clientX, sy = e.clientY, start = { ...w };
-      node.classList.add('is-moving');
-      const move = ev => { apply(start, ev.clientX - sx, ev.clientY - sy); keepInView(w); place(w, node); };
-      const end = () => {
-        handle.removeEventListener('pointermove', move);
-        handle.removeEventListener('pointerup', end);
-        handle.removeEventListener('pointercancel', end);
-        node.classList.remove('is-moving');
-        save();
+      const sx = e.clientX, sy = e.clientY, start = { ...w, ...fitted(w) };
+      let moving = false;
+      const move = ev => {
+        if (ev.pointerId !== e.pointerId) return;
+        if (!moving) {
+          if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 3) return;
+          moving = true;
+          node.classList.add('is-moving');
+        }
+        apply(start, ev.clientX - sx, ev.clientY - sy);
+        keepInView(w);
+        place(w, node);
       };
-      handle.addEventListener('pointermove', move);
-      handle.addEventListener('pointerup', end);
-      handle.addEventListener('pointercancel', end);
+      const end = ev => {
+        if (ev.pointerId !== e.pointerId) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        if (moving) { node.classList.remove('is-moving'); save(); }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
     });
   }
 
-  function mount(w) {
+  function mount(w, screen) {
     const def = Widgets[w.type];
     w.data = { ...def.data(), ...(w.data || {}) };
     const ac = new AbortController();
@@ -96,6 +168,10 @@
       el('span', { class: 'w-dot', 'aria-hidden': 'true' }),
       el('span', { class: 'w-title', text: def.name }),
       tools,
+      def.duplicable ? el('button', {
+        class: 'w-btn', title: 'Duplizieren', 'aria-label': `${def.name} duplizieren`,
+        html: icon('copy'), onclick: () => duplicateWidget(w.id),
+      }) : null,
       el('button', {
         class: 'w-btn w-close', title: 'Entfernen', 'aria-label': `${def.name} entfernen`,
         html: icon('x'), onclick: () => remove(w.id),
@@ -103,20 +179,25 @@
     ]);
     const body = el('div', { class: 'w-body' });
     const grip = el('div', { class: 'w-grip', title: 'Größe ändern', 'aria-hidden': 'true' });
-    const node = el('section', { class: `widget w-${w.type}`, 'aria-label': def.name }, [head, body, grip]);
+    const node = el('section', { class: `widget w-${w.type}${def.frameless ? ' is-frameless' : ''}`, 'aria-label': def.name }, [head, body, grip]);
     node.style.setProperty('--accent', def.accent);
-    node.addEventListener('pointerdown', () => bringToFront(w, node), true);
+    // Formen bleiben auf ihrer Ebene (sonst ließen sie sich nicht nach hinten legen)
+    if (!def.frameless) node.addEventListener('pointerdown', () => bringToFront(w, node), true);
 
-    keepInView(w);
     place(w, node);
-    board.append(node);
+    layerFor(screen).append(node);
 
     makeDraggable(head, w, node, (s, dx, dy) => { w.x = s.x + dx; w.y = s.y + dy; });
+    if (def.dragBody) makeDraggable(body, w, node, (s, dx, dy) => { w.x = s.x + dx; w.y = s.y + dy; });
     makeDraggable(grip, w, node, (s, dx, dy) => { w.w = s.w + dx; w.h = s.h + dy; });
 
     let inst = {};
     try {
-      inst = def.mount({ node, body, tools, data: w.data, save, signal: ac.signal }) || {};
+      inst = def.mount({
+        node, body, tools, data: w.data, save, signal: ac.signal,
+        releaseImage: id => releaseImage(id),
+        layer: where => setLayer(w, where),
+      }) || {};
     } catch (err) {
       console.error(err);
       body.append(el('p', { class: 'w-note', text: 'Dieses Werkzeug konnte nicht geladen werden.' }));
@@ -125,47 +206,139 @@
     return w;
   }
 
-  function add(type, initialData) {
+  /** Neues Werkzeug auf dem aktuellen Bildschirm. size = { w, h } (optional). */
+  function add(type, initialData, size) {
     const def = Widgets[type];
-    const n = state.widgets.length % 6;
+    const screen = currentScreen();
+    const n = screen.widgets.length % 6;
+    const ww = size?.w || def.size.w, hh = size?.h || def.size.h;
     const w = {
-      id: uid(), type, w: def.size.w, h: def.size.h, z: ++topZ, data: { ...def.data(), ...initialData },
-      x: Math.round((window.innerWidth - def.size.w) / 2 + n * 30 - 75),
-      y: Math.round((window.innerHeight - def.size.h) / 2 + n * 30 - 110),
+      id: uid(), type, w: ww, h: hh, z: maxZ(screen) + 1, data: { ...def.data(), ...initialData },
+      x: Math.round((window.innerWidth - ww) / 2 + n * 30 - 75),
+      y: Math.round((window.innerHeight - hh) / 2 + n * 30 - 110),
     };
-    state.widgets.push(w);
-    mount(w);
+    screen.widgets.push(w);
+    mount(w, screen);
     updateEmpty();
     save();
     return w;
   }
 
-  function remove(id) {
-    const i = state.widgets.findIndex(w => w.id === id);
-    if (i < 0) return;
-    const [w] = state.widgets.splice(i, 1);
+  function duplicateWidget(id) {
+    const found = findWidget(id);
+    if (!found) return;
+    const copy = JSON.parse(JSON.stringify(found.w));
+    Object.assign(copy, { id: uid(), x: found.w.x + 28, y: found.w.y + 28, z: maxZ(found.screen) + 1 });
+    found.screen.widgets.push(copy);
+    mount(copy, found.screen);
+    save();
+  }
+
+  function unmount(id) {
     const entry = live.get(id);
     live.delete(id);
-    if (entry) {
-      try { entry.inst.destroy?.(); } catch (err) { console.error(err); }
-      entry.ac.abort();
-      entry.node.classList.add('is-leaving');
-      setTimeout(() => entry.node.remove(), 160);
-    }
-    Widgets[w.type].onRemove?.(w.data);
+    if (!entry) return;
+    try { entry.inst.destroy?.(); } catch (err) { console.error(err); }
+    entry.ac.abort();
+    entry.node.classList.add('is-leaving');
+    setTimeout(() => entry.node.remove(), 160);
+  }
+
+  function remove(id) {
+    const found = findWidget(id);
+    if (!found) return;
+    found.screen.widgets.splice(found.index, 1);
+    unmount(id);
+    Widgets[found.w.type].onRemove?.(found.w.data);
+    releaseImage(found.w.data?.imageId);
     updateEmpty();
     save();
   }
 
   function clearAll() {
-    if (!state.widgets.length) return;
-    if (!confirm('Alle Werkzeuge vom Bildschirm entfernen?')) return;
-    [...state.widgets].forEach(w => remove(w.id));
+    const screen = currentScreen();
+    if (!screen.widgets.length) return;
+    if (!confirm(`Alle Werkzeuge von „${screen.name}“ entfernen?`)) return;
+    [...screen.widgets].forEach(w => remove(w.id));
   }
 
-  window.addEventListener('resize', debounce(() => {
-    for (const w of state.widgets) { keepInView(w); const e = live.get(w.id); if (e) place(w, e.node); }
+  /* ---------- Bildschirme ---------- */
+  const flash = el('div', { class: 'screen-flash', 'aria-live': 'polite' });
+  document.body.append(flash);
+
+  function showScreen(index, { announce = true } = {}) {
+    state.current = clamp(index, 0, state.screens.length - 1);
+    const active = currentScreen();
+    for (const screen of state.screens) layerFor(screen).classList.toggle('is-active', screen === active);
+    closePopover();
+    if (document.activeElement && board.contains(document.activeElement)) document.activeElement.blur();
+    updateEmpty();
+    updateNav();
+    renderScreensPanel();
     save();
+    if (announce && state.screens.length > 1) {
+      flash.textContent = `${state.current + 1} / ${state.screens.length} · ${active.name}`;
+      flash.classList.remove('show');
+      void flash.offsetWidth; // Animation neu starten
+      flash.classList.add('show');
+    }
+  }
+  const nextScreen = () => { if (state.current < state.screens.length - 1) showScreen(state.current + 1); };
+  const prevScreen = () => { if (state.current > 0) showScreen(state.current - 1); };
+
+  function addScreen() {
+    const screen = { id: uid(), name: `Bildschirm ${state.screens.length + 1}`, widgets: [] };
+    state.screens.splice(state.current + 1, 0, screen);
+    layerFor(screen);
+    showScreen(state.current + 1);
+  }
+
+  function duplicateScreen(i) {
+    const copy = JSON.parse(JSON.stringify(state.screens[i]));
+    copy.id = uid();
+    copy.name = `${copy.name} (Kopie)`;
+    copy.widgets.forEach(w => { w.id = uid(); });
+    state.screens.splice(i + 1, 0, copy);
+    copy.widgets.forEach(w => mount(w, copy));
+    showScreen(i + 1);
+  }
+
+  function deleteScreen(i) {
+    const screen = state.screens[i];
+    if (state.screens.length === 1) { toast('Der letzte Bildschirm kann nicht gelöscht werden.'); return; }
+    if (screen.widgets.length && !confirm(`„${screen.name}“ mit allen Werkzeugen löschen?`)) return;
+    state.screens.splice(i, 1);
+    screen.widgets.forEach(w => { unmount(w.id); releaseImage(w.data?.imageId); });
+    layers.get(screen.id)?.remove();
+    layers.delete(screen.id);
+    // Davor gelegene Bildschirme rücken auf; der gelöschte wird durch seinen Nachfolger ersetzt
+    const cur = state.current > i ? state.current - 1 : Math.min(state.current, state.screens.length - 1);
+    showScreen(cur, { announce: false });
+  }
+
+  function moveScreen(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= state.screens.length) return;
+    [state.screens[i], state.screens[j]] = [state.screens[j], state.screens[i]];
+    const cur = state.current === i ? j : state.current === j ? i : state.current;
+    showScreen(cur, { announce: false });
+  }
+
+  // Weiterblättern mit Pfeiltasten und Bild↑/Bild↓ (auch Präsentations-Presenter)
+  document.addEventListener('keydown', e => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target;
+    if (t.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"], .popover')) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); nextScreen(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevScreen(); }
+    else if (e.key === 'Home' && state.screens.length > 1) { e.preventDefault(); showScreen(0); }
+    else if (e.key === 'End' && state.screens.length > 1) { e.preventDefault(); showScreen(state.screens.length - 1); }
+  });
+
+  window.addEventListener('resize', debounce(() => {
+    for (const screen of state.screens) {
+      for (const w of screen.widgets) { const e = live.get(w.id); if (e) place(w, e.node); }
+    }
     applyBackground(); // Hintergrundbild in passender Auflösung neu berechnen
   }, 150));
 
@@ -243,8 +416,8 @@
 
   function setBackground(bg) {
     const old = state.background;
-    if (old?.kind === 'image' && old.imageId !== bg.imageId) ImageDB.del(old.imageId).catch(() => {});
     state.background = bg;
+    if (old?.kind === 'image' && old.imageId !== bg.imageId) releaseImage(old.imageId);
     save();
     applyBackground();
   }
@@ -311,8 +484,10 @@
   /* ---------- Werkzeugleiste & Menüs ---------- */
   const dock = $('#dock');
   const collabPanel = $('#collab-panel');
+  const screensPanel = $('#screens-panel');
+  const shapesPanel = $('#shapes-panel');
   const panels = []; // { panel, btn }
-  let fsBtn;
+  let fsBtn, navPrev, navNext, navLabel;
 
   function dockButton(label, iconName, onclick, accent) {
     const b = el('button', { class: 'dock-btn', html: icon(iconName) + `<span>${label}</span>`, onclick });
@@ -331,28 +506,77 @@
   }
   const closePanels = () => panels.forEach(p => { p.panel.hidden = true; p.btn.setAttribute('aria-expanded', 'false'); });
 
-  function panelButton(label, iconName, panelEl, accent) {
-    const entry = { panel: panelEl };
-    entry.btn = dockButton(label, iconName, () => togglePanel(entry), accent);
-    entry.btn.setAttribute('aria-expanded', 'false');
+  function registerPanel(btn, panelEl) {
+    const entry = { panel: panelEl, btn };
+    btn.addEventListener('click', () => togglePanel(entry));
+    btn.setAttribute('aria-expanded', 'false');
     panels.push(entry);
-    return entry.btn;
+    return btn;
   }
+  const panelButton = (label, iconName, panelEl, accent) => registerPanel(dockButton(label, iconName, null, accent), panelEl);
 
   function buildDock() {
+    navPrev = el('button', { class: 'nav-btn', title: 'Vorheriger Bildschirm (←, Bild↑)', 'aria-label': 'Vorheriger Bildschirm', html: icon('left'), onclick: prevScreen });
+    navNext = el('button', { class: 'nav-btn', title: 'Nächster Bildschirm (→, Bild↓)', 'aria-label': 'Nächster Bildschirm', html: icon('right'), onclick: nextScreen });
+    navLabel = registerPanel(el('button', { class: 'nav-label', title: 'Bildschirme verwalten' }), screensPanel);
+    const nav = el('div', { class: 'dock-nav' }, [navPrev, navLabel, navNext]);
+
     const adders = ORDER.filter(t => Widgets[t]).map(t => {
       const d = Widgets[t];
       const b = dockButton(d.name, d.icon, () => add(t), d.accent);
       b.title = `${d.name} hinzufügen`;
       return b;
     });
+    const shapesBtn = panelButton('Formen', 'shapes', shapesPanel, '#e85d75');
+    shapesBtn.title = 'Formen, Kästen & Symbole einfügen';
     const collabBtn = panelButton('Gemeinsam', 'users', collabPanel, '#5b5bd6');
     collabBtn.title = 'Zusammenarbeit: Pinnwände, Dokumente, Umfragen …';
     const bgBtn = panelButton('Hintergrund', 'palette', panel);
     fsBtn = dockButton('Vollbild', 'expand', toggleFullscreen);
     const clearBtn = dockButton('Leeren', 'trash', clearAll);
-    dock.replaceChildren(...adders, el('span', { class: 'dock-sep', 'aria-hidden': 'true' }), collabBtn, bgBtn, fsBtn, clearBtn);
+    clearBtn.title = 'Alle Werkzeuge von diesem Bildschirm entfernen';
+    const sep = () => el('span', { class: 'dock-sep', 'aria-hidden': 'true' });
+    dock.replaceChildren(nav, sep(), ...adders, shapesBtn, sep(), collabBtn, bgBtn, fsBtn, clearBtn);
     if (!document.fullscreenEnabled) fsBtn.hidden = true;
+  }
+
+  function updateNav() {
+    if (!navLabel) return;
+    navLabel.innerHTML = `<strong>${state.current + 1}</strong><span>/ ${state.screens.length}</span>`;
+    navLabel.setAttribute('aria-label', `Bildschirm ${state.current + 1} von ${state.screens.length}: ${currentScreen().name}. Bildschirme verwalten`);
+    navPrev.disabled = state.current === 0;
+    navNext.disabled = state.current === state.screens.length - 1;
+  }
+
+  /* Übersicht der Bildschirme */
+  function renderScreensPanel() {
+    if (!screensPanel) return;
+    const rows = state.screens.map((screen, i) => {
+      const name = el('input', { class: 'sc-name', type: 'text', value: screen.name, 'aria-label': `Name von Bildschirm ${i + 1}` });
+      name.addEventListener('input', () => { screen.name = name.value; save(); });
+      name.addEventListener('change', () => { if (!name.value.trim()) { screen.name = `Bildschirm ${i + 1}`; name.value = screen.name; save(); } });
+      name.addEventListener('keydown', e => { if (e.key === 'Enter') name.blur(); });
+      const count = screen.widgets.length;
+      const mini = (iconName, label, onclick, disabled, extra = '') => el('button', {
+        class: `mini-btn ${extra}`, type: 'button', title: label, 'aria-label': `${label}: ${screen.name}`, html: icon(iconName), onclick, disabled,
+      });
+      const row = el('li', { class: 'sc-row' + (i === state.current ? ' is-current' : '') }, [
+        el('button', { class: 'sc-num', type: 'button', text: String(i + 1), title: 'Anzeigen', 'aria-label': `Bildschirm ${i + 1} anzeigen`, onclick: () => showScreen(i) }),
+        el('div', { class: 'sc-main' }, [name, el('small', { text: count === 1 ? '1 Werkzeug' : `${count} Werkzeuge` })]),
+        mini('up', 'Nach vorne verschieben', () => moveScreen(i, -1), i === 0),
+        mini('down', 'Nach hinten verschieben', () => moveScreen(i, 1), i === state.screens.length - 1),
+        mini('copy', 'Duplizieren', () => duplicateScreen(i)),
+        mini('trash', 'Löschen', () => deleteScreen(i), state.screens.length === 1, 'del'),
+      ]);
+      row.addEventListener('click', e => { if (!e.target.closest('button, input')) showScreen(i); });
+      return row;
+    });
+    screensPanel.replaceChildren(
+      el('h2', { text: 'Bildschirme' }),
+      el('p', { class: 'sc-hint', text: 'Wie Folien einer Präsentation: Blättern mit ◀ ▶, den Pfeiltasten oder Bild↑/Bild↓ (auch mit einem Presenter).' }),
+      el('ol', { class: 'sc-list' }, rows),
+      el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Neuer Bildschirm</span>', onclick: addScreen }),
+    );
   }
 
   document.addEventListener('pointerdown', e => {
@@ -377,7 +601,7 @@
       idleTimer = setTimeout(() => document.body.classList.add('idle'), 3000);
     }
   }
-  ['pointermove', 'pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
+  ['pointermove', 'pointerdown'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
   document.addEventListener('fullscreenchange', () => {
     const on = !!document.fullscreenElement;
     fsBtn.innerHTML = icon(on ? 'shrink' : 'expand') + `<span>${on ? 'Beenden' : 'Vollbild'}</span>`;
@@ -401,7 +625,8 @@
   buildDock();
   buildPanel();
   buildCollabPanel(collabPanel, { state, save, addWidget: add, close: closePanels });
+  buildShapesPanel(shapesPanel, { addWidget: add, close: closePanels });
   applyBackground();
-  state.widgets.forEach(mount);
-  updateEmpty();
+  for (const screen of state.screens) screen.widgets.forEach(w => mount(w, screen));
+  showScreen(state.current, { announce: false });
 })();

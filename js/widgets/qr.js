@@ -32,6 +32,7 @@ registerWidget('qr', {
   size: { w: 320, h: 390 },
   min: { w: 190, h: 200 },
   data: () => ({ text: '', caption: true, title: '' }),
+  duplicable: true,
 
   mount({ body, tools, data, save, signal }) {
     const view = el('div', { class: 'qr-view' });

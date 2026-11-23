@@ -15,6 +15,17 @@ Läuft komplett im Browser, ohne Konto, ohne Server, ohne Werbung.
 | **Bild** | Bild auswählen, hineinziehen oder einfach **Strg+V** auf der Fläche |
 | **QR-Code** | Link eingeben (optional mit Überschrift) → Schüler*innen scannen mit dem Tablet |
 
+**Mehrere Bildschirme (wie Folien):** Unten links ◀ 2 / 5 ▶. Ein Klick auf die Zahl öffnet die Übersicht
+(neu, duplizieren, umbenennen, sortieren, löschen). Blättern mit ◀ ▶, Pfeiltasten oder Bild↑/Bild↓ –
+funktioniert also auch mit einem Präsentations-Presenter. Werkzeuge auf anderen Bildschirmen laufen weiter
+(ein Timer gongt auch, wenn gerade ein anderer Bildschirm gezeigt wird).
+
+**Formen & Symbole:** Box, abgerundete Box, Kreis, Pfeil (4 Richtungen), Sprechblase, Stern, Schild;
+Kästen „Merke“, „Tipp“, „Achtung“, „Aufgabe“; Arbeitsform-Symbole (Einzel-, Partner-, Gruppenarbeit, Plenum,
+Leise arbeiten …) und beliebige Emojis. Direkt am Objekt ziehen, **Doppelklick** (oder ✎) bearbeitet den Text,
+die Palette 🎨 ändert Füllung, Rand, Textfarbe/-größe, Pfeilrichtung und Ebene (nach vorne/hinten).
+Text, Bild, QR-Code, Agenda und Formen lassen sich mit ⧉ duplizieren.
+
 **Menü „Gemeinsam“:** Sammlung bewährter Werkzeuge für Zusammenarbeit (Dokumente, Pinnwände,
 Whiteboards, Brainstorming, Umfragen, Quiz), eigene Links (z. B. Schul-Cloud, Moodle) und
 „Für die Klasse anzeigen“: Teilen-Link einfügen → großer QR-Code mit Überschrift.

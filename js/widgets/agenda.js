@@ -15,6 +15,7 @@ registerWidget('agenda', {
   accent: '#0b7a85',
   size: { w: 420, h: 430 },
   min: { w: 220, h: 170 },
+  duplicable: true,
   data: () => ({
     heading: '',
     mode: 'check',
