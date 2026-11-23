@@ -1,56 +1,110 @@
 'use strict';
 
 /* =====================================================================
-   App: Bildschirme (wie Folien), Arbeitsfläche, Werkzeugleiste,
-   Hintergrund, Speichern.
+   App: Startseite „Meine Stunden“, Bildschirme (wie Folien),
+   Arbeitsfläche, Werkzeugleiste, Hintergrund, Speichern.
+
+   Datenmodell:
+   state = { lessons: [ { id, name, screens: [ { id, name, widgets } ],
+                          current, created, updated } ],
+             lastLesson, background, effects, collabLinks }
    ===================================================================== */
 (() => {
   const STORAGE_KEY = 'klassenbildschirm.v1';
   const ORDER = ['timer', 'stopwatch', 'clock', 'agenda', 'text', 'image', 'qr'];
 
-  /* ---------- Zustand laden & speichern ---------- */
+  /* ---------- Zustand laden ---------- */
   const renumber = screen => screen.widgets
     .sort((a, b) => (a.z || 0) - (b.z || 0))
     .forEach((w, i) => { w.z = i + 1; });
+
+  const makeScreen = n => ({ id: uid(), name: `Bildschirm ${n}`, widgets: [] });
+  const makeLesson = name => ({ id: uid(), name, screens: [makeScreen(1)], current: 0, created: Date.now(), updated: Date.now() });
+
+  function normalizeLesson(l, i) {
+    const lesson = {
+      id: String(l?.id || uid()),
+      name: String(l?.name || `Stunde ${i + 1}`),
+      screens: Array.isArray(l?.screens) && l.screens.length ? l.screens : [makeScreen(1)],
+      current: l?.current | 0,
+      created: Number(l?.created) || Date.now(),
+      updated: Number(l?.updated) || Date.now(),
+    };
+    lesson.screens.forEach((screen, n) => {
+      screen.id ||= uid();
+      screen.name ||= `Bildschirm ${n + 1}`;
+      screen.widgets = (Array.isArray(screen.widgets) ? screen.widgets : []).filter(w => w && Widgets[w.type]);
+      renumber(screen);
+    });
+    lesson.current = clamp(lesson.current, 0, lesson.screens.length - 1);
+    return lesson;
+  }
 
   function loadState() {
     let s = null;
     try { s = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { /* beschädigt → neu */ }
     if (!s || typeof s !== 'object') s = {};
-    // Ältere Version: eine einzige Fläche → wird Bildschirm 1
-    if (!Array.isArray(s.screens) || !s.screens.length) {
-      s.screens = [{ id: uid(), name: 'Bildschirm 1', widgets: Array.isArray(s.widgets) ? s.widgets : [] }];
+    if (!Array.isArray(s.lessons)) {
+      // Ältere Versionen: eine Fläche (widgets) bzw. eine Folge von Bildschirmen (screens)
+      const screens = Array.isArray(s.screens) ? s.screens
+        : Array.isArray(s.widgets) && s.widgets.length ? [{ id: uid(), name: 'Bildschirm 1', widgets: s.widgets }]
+        : null;
+      s.lessons = screens ? [{ id: uid(), name: 'Meine erste Stunde', screens, current: s.current | 0 }] : [];
     }
-    delete s.widgets;
+    delete s.screens; delete s.widgets; delete s.current;
+    s.lessons = s.lessons.map(normalizeLesson);
     s.background ||= { kind: 'auto' };
-    for (const screen of s.screens) {
-      screen.widgets = (screen.widgets || []).filter(w => Widgets[w.type]);
-      renumber(screen);
-    }
-    s.current = clamp(s.current | 0, 0, s.screens.length - 1);
+    if (!s.lessons.some(l => l.id === s.lastLesson)) s.lastLesson = s.lessons[0]?.id || null;
     return s;
   }
 
   const state = loadState();
-  let saveWarned = false;
-  let saveSuppressed = false; // während eine Sicherung geladen wird
+  let lesson = null; // geöffnete Stunde (null = Startseite)
+
+  /* ---------- Speichern (mit sichtbarer Bestätigung) ---------- */
+  const saveBadge = el('div', { class: 'save-badge', role: 'status', 'aria-live': 'polite' });
+  document.body.append(saveBadge);
+  let saveFailed = false, badgeTimer;
 
   function saveNow() {
-    if (saveSuppressed) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      if (saveFailed) { saveFailed = false; saveBadge.classList.remove('is-error'); }
+      saveBadge.innerHTML = icon('check') + '<span>Gespeichert</span>';
+      saveBadge.classList.add('show');
+      clearTimeout(badgeTimer);
+      badgeTimer = setTimeout(() => saveBadge.classList.remove('show'), 1400);
     } catch {
-      if (!saveWarned) { saveWarned = true; toast('Speichern fehlgeschlagen: Der Browser-Speicher ist voll.'); }
+      saveFailed = true;
+      clearTimeout(badgeTimer);
+      saveBadge.innerHTML = '<span>⚠ Nicht gespeichert – Browser-Speicher voll. Bitte Bilder entfernen und eine Sicherung erstellen.</span>';
+      saveBadge.classList.add('show', 'is-error');
     }
   }
-  const save = debounce(saveNow, 250);
+  const save = debounce(saveNow, 300);
+  /** Änderung an der geöffneten Stunde (merkt sich „zuletzt bearbeitet“). */
+  const changed = () => { if (lesson) lesson.updated = Date.now(); save(); };
   window.addEventListener('pagehide', saveNow);
 
-  const currentScreen = () => state.screens[state.current];
+  /** Den Browser bitten, die Daten nie von selbst aufzuräumen. */
+  let persisted = null;
+  async function requestPersist() {
+    try {
+      if (!navigator.storage?.persist) return;
+      persisted = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+    } catch { /* nicht unterstützt */ }
+    renderStorageNote();
+  }
+  navigator.storage?.persisted?.().then(p => { persisted = p; renderStorageNote(); }).catch(() => {});
+
+  /* ---------- Hilfen rund um die geöffnete Stunde ---------- */
+  const currentScreen = () => lesson.screens[lesson.current];
   const maxZ = screen => screen.widgets.reduce((m, w) => Math.max(m, w.z || 0), 0);
+  const allWidgets = () => state.lessons.flatMap(l => l.screens.flatMap(s => s.widgets));
 
   function findWidget(id) {
-    for (const screen of state.screens) {
+    if (!lesson) return null;
+    for (const screen of lesson.screens) {
       const index = screen.widgets.findIndex(w => w.id === id);
       if (index >= 0) return { screen, index, w: screen.widgets[index] };
     }
@@ -60,8 +114,7 @@
   /** Bild aus dem Speicher löschen – aber nur, wenn es nirgends mehr benutzt wird. */
   function releaseImage(id) {
     if (!id) return;
-    const used = state.background?.imageId === id ||
-      state.screens.some(s => s.widgets.some(w => w.data?.imageId === id));
+    const used = state.background?.imageId === id || allWidgets().some(w => w.data?.imageId === id);
     if (!used) ImageDB.del(id).catch(() => {});
   }
 
@@ -81,7 +134,7 @@
     return layer;
   }
 
-  function updateEmpty() { emptyHint.hidden = currentScreen().widgets.length > 0; }
+  function updateEmpty() { emptyHint.hidden = !lesson || currentScreen().widgets.length > 0; }
 
   /** Position & Größe, angepasst an den sichtbaren Bereich (Kopfzeile bleibt greifbar).
       Ändert die gespeicherten Werte NICHT – ein kleines oder (beim Start) noch
@@ -115,7 +168,7 @@
     if (!screen || w.z === maxZ(screen)) return;
     w.z = maxZ(screen) + 1;
     node.style.zIndex = w.z;
-    save();
+    changed();
   }
 
   /** Ebene ändern: 'front' = ganz nach vorne, 'back' = ganz nach hinten. */
@@ -125,7 +178,7 @@
     w.z = where === 'back' ? -1 : maxZ(screen) + 1;
     renumber(screen);
     screen.widgets.forEach(x => { const e = live.get(x.id); if (e) e.node.style.zIndex = x.z; });
-    save();
+    changed();
   }
 
   /** Ziehen per Maus, Stift oder Finger. Beginnt erst ab 3 px Bewegung,
@@ -152,7 +205,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', end);
         window.removeEventListener('pointercancel', end);
-        if (moving) { node.classList.remove('is-moving'); save(); }
+        if (moving) { node.classList.remove('is-moving'); changed(); }
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', end);
@@ -196,7 +249,7 @@
     let inst = {};
     try {
       inst = def.mount({
-        node, body, tools, data: w.data, save, signal: ac.signal,
+        node, body, tools, data: w.data, save: changed, signal: ac.signal,
         releaseImage: id => releaseImage(id),
         layer: where => setLayer(w, where),
       }) || {};
@@ -210,6 +263,7 @@
 
   /** Neues Werkzeug auf dem aktuellen Bildschirm. size = { w, h } (optional). */
   function add(type, initialData, size) {
+    if (!lesson) return null;
     const def = Widgets[type];
     const screen = currentScreen();
     const n = screen.widgets.length % 6;
@@ -222,7 +276,7 @@
     screen.widgets.push(w);
     mount(w, screen);
     updateEmpty();
-    save();
+    changed();
     return w;
   }
 
@@ -233,15 +287,16 @@
     Object.assign(copy, { id: uid(), x: found.w.x + 28, y: found.w.y + 28, z: maxZ(found.screen) + 1 });
     found.screen.widgets.push(copy);
     mount(copy, found.screen);
-    save();
+    changed();
   }
 
-  function unmount(id) {
+  function unmount(id, animate = true) {
     const entry = live.get(id);
     live.delete(id);
     if (!entry) return;
     try { entry.inst.destroy?.(); } catch (err) { console.error(err); }
     entry.ac.abort();
+    if (!animate) { entry.node.remove(); return; }
     entry.node.classList.add('is-leaving');
     setTimeout(() => entry.node.remove(), 160);
   }
@@ -254,7 +309,7 @@
     Widgets[found.w.type].onRemove?.(found.w.data);
     releaseImage(found.w.data?.imageId);
     updateEmpty();
-    save();
+    changed();
   }
 
   function clearAll() {
@@ -264,82 +319,125 @@
     [...screen.widgets].forEach(w => remove(w.id));
   }
 
-  /* ---------- Bildschirme ---------- */
+  /* ---------- Stunden öffnen & schließen ---------- */
   const flash = el('div', { class: 'screen-flash', 'aria-live': 'polite' });
   document.body.append(flash);
+  function showFlash(text) {
+    flash.textContent = text;
+    flash.classList.remove('show');
+    void flash.offsetWidth; // Animation neu starten
+    flash.classList.add('show');
+  }
 
+  function openLesson(id) {
+    const next = state.lessons.find(l => l.id === id);
+    if (!next) return;
+    closeLesson();
+    lesson = next;
+    state.lastLesson = lesson.id;
+    for (const screen of lesson.screens) screen.widgets.forEach(w => mount(w, screen));
+    home.hidden = true;
+    document.body.classList.remove('at-home');
+    showScreen(lesson.current, { announce: false });
+    showFlash(lesson.screens.length > 1 ? `${lesson.name} · ${lesson.current + 1} / ${lesson.screens.length}` : lesson.name);
+    requestPersist();
+    saveNow();
+  }
+
+  function closeLesson() {
+    if (!lesson) return;
+    for (const screen of lesson.screens) screen.widgets.forEach(w => unmount(w.id, false));
+    layers.forEach(layer => layer.remove());
+    layers.clear();
+    lesson = null;
+  }
+
+  function showHome() {
+    closePanels();
+    closePopover();
+    saveNow();
+    closeLesson();
+    renderHome();
+    home.hidden = false;
+    document.body.classList.add('at-home');
+    updateEmpty();
+    home.querySelector('.lesson-open, .lesson-new')?.focus({ preventScroll: true });
+  }
+
+  /* ---------- Bildschirme der geöffneten Stunde ---------- */
   function showScreen(index, { announce = true } = {}) {
-    state.current = clamp(index, 0, state.screens.length - 1);
+    lesson.current = clamp(index, 0, lesson.screens.length - 1);
     const active = currentScreen();
-    for (const screen of state.screens) layerFor(screen).classList.toggle('is-active', screen === active);
+    for (const screen of lesson.screens) layerFor(screen).classList.toggle('is-active', screen === active);
     closePopover();
     if (document.activeElement && board.contains(document.activeElement)) document.activeElement.blur();
     updateEmpty();
     updateNav();
     renderScreensPanel();
     save();
-    if (announce && state.screens.length > 1) {
-      flash.textContent = `${state.current + 1} / ${state.screens.length} · ${active.name}`;
-      flash.classList.remove('show');
-      void flash.offsetWidth; // Animation neu starten
-      flash.classList.add('show');
-    }
+    if (announce && lesson.screens.length > 1) showFlash(`${lesson.current + 1} / ${lesson.screens.length} · ${active.name}`);
   }
-  const nextScreen = () => { if (state.current < state.screens.length - 1) showScreen(state.current + 1); };
-  const prevScreen = () => { if (state.current > 0) showScreen(state.current - 1); };
+  const nextScreen = () => { if (lesson && lesson.current < lesson.screens.length - 1) showScreen(lesson.current + 1); };
+  const prevScreen = () => { if (lesson && lesson.current > 0) showScreen(lesson.current - 1); };
 
   function addScreen() {
-    const screen = { id: uid(), name: `Bildschirm ${state.screens.length + 1}`, widgets: [] };
-    state.screens.splice(state.current + 1, 0, screen);
+    const screen = makeScreen(lesson.screens.length + 1);
+    lesson.screens.splice(lesson.current + 1, 0, screen);
     layerFor(screen);
-    showScreen(state.current + 1);
+    changed();
+    showScreen(lesson.current + 1);
   }
 
   function duplicateScreen(i) {
-    const copy = JSON.parse(JSON.stringify(state.screens[i]));
+    const copy = JSON.parse(JSON.stringify(lesson.screens[i]));
     copy.id = uid();
     copy.name = `${copy.name} (Kopie)`;
     copy.widgets.forEach(w => { w.id = uid(); });
-    state.screens.splice(i + 1, 0, copy);
+    lesson.screens.splice(i + 1, 0, copy);
     copy.widgets.forEach(w => mount(w, copy));
+    changed();
     showScreen(i + 1);
   }
 
   function deleteScreen(i) {
-    const screen = state.screens[i];
-    if (state.screens.length === 1) { toast('Der letzte Bildschirm kann nicht gelöscht werden.'); return; }
+    const screen = lesson.screens[i];
+    if (lesson.screens.length === 1) { toast('Der letzte Bildschirm einer Stunde kann nicht gelöscht werden.'); return; }
     if (screen.widgets.length && !confirm(`„${screen.name}“ mit allen Werkzeugen löschen?`)) return;
-    state.screens.splice(i, 1);
+    lesson.screens.splice(i, 1);
     screen.widgets.forEach(w => { unmount(w.id); releaseImage(w.data?.imageId); });
     layers.get(screen.id)?.remove();
     layers.delete(screen.id);
+    changed();
     // Davor gelegene Bildschirme rücken auf; der gelöschte wird durch seinen Nachfolger ersetzt
-    const cur = state.current > i ? state.current - 1 : Math.min(state.current, state.screens.length - 1);
+    const cur = lesson.current > i ? lesson.current - 1 : Math.min(lesson.current, lesson.screens.length - 1);
     showScreen(cur, { announce: false });
   }
 
   function moveScreen(i, dir) {
     const j = i + dir;
-    if (j < 0 || j >= state.screens.length) return;
-    [state.screens[i], state.screens[j]] = [state.screens[j], state.screens[i]];
-    const cur = state.current === i ? j : state.current === j ? i : state.current;
+    if (j < 0 || j >= lesson.screens.length) return;
+    [lesson.screens[i], lesson.screens[j]] = [lesson.screens[j], lesson.screens[i]];
+    const cur = lesson.current === i ? j : lesson.current === j ? i : lesson.current;
+    changed();
     showScreen(cur, { announce: false });
   }
 
   // Weiterblättern mit Pfeiltasten und Bild↑/Bild↓ (auch Präsentations-Presenter)
   document.addEventListener('keydown', e => {
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!lesson || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
     const t = e.target;
     if (t.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"], .popover')) return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); nextScreen(); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevScreen(); }
-    else if (e.key === 'Home' && state.screens.length > 1) { e.preventDefault(); showScreen(0); }
-    else if (e.key === 'End' && state.screens.length > 1) { e.preventDefault(); showScreen(state.screens.length - 1); }
+    else if (e.key === 'Home' && lesson.screens.length > 1) { e.preventDefault(); showScreen(0); }
+    else if (e.key === 'End' && lesson.screens.length > 1) { e.preventDefault(); showScreen(lesson.screens.length - 1); }
   });
 
   window.addEventListener('resize', debounce(() => {
-    for (const screen of state.screens) {
-      for (const w of screen.widgets) { const e = live.get(w.id); if (e) place(w, e.node); }
+    if (lesson) {
+      for (const screen of lesson.screens) {
+        for (const w of screen.widgets) { const e = live.get(w.id); if (e) place(w, e.node); }
+      }
     }
     applyBackground(); // Hintergrundbild in passender Auflösung neu berechnen
   }, 150));
@@ -390,6 +488,15 @@
     document.body.dataset.tone = light ? 'light' : 'dark';
     renderEffects(fxLayer, state.effects ? fx : null);
     updatePanelSelection();
+  }
+
+  /** Kleines Hintergrundbild für die Vorschaukarten der Startseite. */
+  async function backgroundThumb() {
+    const bg = state.background || { kind: 'auto' };
+    if (bg.kind === 'color') return safeColor(bg.color, '#4a6fa5');
+    if (bg.kind === 'image' && bgObjectUrl) return `center / cover no-repeat url("${bgObjectUrl}"), #222`;
+    const p = (bg.kind === 'preset' && bgPreset(bg.id)) || bgPreset(currentSeason());
+    return presetCss(p, 320, 180, true);
   }
 
   function updatePanelSelection() {
@@ -452,7 +559,7 @@
     fxBox.checked = !!state.effects;
     fxBox.addEventListener('change', () => { state.effects = fxBox.checked; save(); applyBackground(); });
 
-    const color = el('input', { type: 'color', value: state.background?.color || '#4a6fa5', 'aria-label': 'Eigene Farbe' });
+    const color = el('input', { type: 'color', value: safeColor(state.background?.color, '#4a6fa5'), 'aria-label': 'Eigene Farbe' });
     color.addEventListener('input', () => setBackground({ kind: 'color', color: color.value }));
     const upload = el('button', {
       class: 'btn', html: icon('upload') + '<span>Eigenes Bild</span>',
@@ -518,6 +625,8 @@
   const panelButton = (label, iconName, panelEl, accent) => registerPanel(dockButton(label, iconName, null, accent), panelEl);
 
   function buildDock() {
+    const homeBtn = dockButton('Übersicht', 'home', showHome);
+    homeBtn.title = 'Zur Startseite „Meine Stunden“';
     navPrev = el('button', { class: 'nav-btn', title: 'Vorheriger Bildschirm (←, Bild↑)', 'aria-label': 'Vorheriger Bildschirm', html: icon('left'), onclick: prevScreen });
     navNext = el('button', { class: 'nav-btn', title: 'Nächster Bildschirm (→, Bild↓)', 'aria-label': 'Nächster Bildschirm', html: icon('right'), onclick: nextScreen });
     navLabel = registerPanel(el('button', { class: 'nav-label', title: 'Bildschirme verwalten' }), screensPanel);
@@ -538,114 +647,50 @@
     const clearBtn = dockButton('Leeren', 'trash', clearAll);
     clearBtn.title = 'Alle Werkzeuge von diesem Bildschirm entfernen';
     const sep = () => el('span', { class: 'dock-sep', 'aria-hidden': 'true' });
-    dock.replaceChildren(nav, sep(), ...adders, shapesBtn, sep(), collabBtn, bgBtn, fsBtn, clearBtn);
+    dock.replaceChildren(homeBtn, nav, sep(), ...adders, shapesBtn, sep(), collabBtn, bgBtn, fsBtn, clearBtn);
     if (!document.fullscreenEnabled) fsBtn.hidden = true;
   }
 
   function updateNav() {
-    if (!navLabel) return;
-    navLabel.innerHTML = `<strong>${state.current + 1}</strong><span>/ ${state.screens.length}</span>`;
-    navLabel.setAttribute('aria-label', `Bildschirm ${state.current + 1} von ${state.screens.length}: ${currentScreen().name}. Bildschirme verwalten`);
-    navPrev.disabled = state.current === 0;
-    navNext.disabled = state.current === state.screens.length - 1;
+    if (!navLabel || !lesson) return;
+    navLabel.innerHTML = `<strong>${lesson.current + 1}</strong><span>/ ${lesson.screens.length}</span>`;
+    navLabel.setAttribute('aria-label', `Bildschirm ${lesson.current + 1} von ${lesson.screens.length}: ${currentScreen().name}. Bildschirme verwalten`);
+    navPrev.disabled = lesson.current === 0;
+    navNext.disabled = lesson.current === lesson.screens.length - 1;
   }
 
-  /* Übersicht der Bildschirme */
+  /* Übersicht der Bildschirme der geöffneten Stunde */
   function renderScreensPanel() {
-    if (!screensPanel) return;
-    const rows = state.screens.map((screen, i) => {
+    if (!screensPanel || !lesson) return;
+    const rows = lesson.screens.map((screen, i) => {
       const name = el('input', { class: 'sc-name', type: 'text', value: screen.name, 'aria-label': `Name von Bildschirm ${i + 1}` });
-      name.addEventListener('input', () => { screen.name = name.value; save(); });
-      name.addEventListener('change', () => { if (!name.value.trim()) { screen.name = `Bildschirm ${i + 1}`; name.value = screen.name; save(); } });
+      name.addEventListener('input', () => { screen.name = name.value; changed(); });
+      name.addEventListener('change', () => { if (!name.value.trim()) { screen.name = `Bildschirm ${i + 1}`; name.value = screen.name; changed(); } });
       name.addEventListener('keydown', e => { if (e.key === 'Enter') name.blur(); });
       const count = screen.widgets.length;
       const mini = (iconName, label, onclick, disabled, extra = '') => el('button', {
         class: `mini-btn ${extra}`, type: 'button', title: label, 'aria-label': `${label}: ${screen.name}`, html: icon(iconName), onclick, disabled,
       });
-      const row = el('li', { class: 'sc-row' + (i === state.current ? ' is-current' : '') }, [
+      const row = el('li', { class: 'sc-row' + (i === lesson.current ? ' is-current' : '') }, [
         el('button', { class: 'sc-num', type: 'button', text: String(i + 1), title: 'Anzeigen', 'aria-label': `Bildschirm ${i + 1} anzeigen`, onclick: () => showScreen(i) }),
         el('div', { class: 'sc-main' }, [name, el('small', { text: count === 1 ? '1 Werkzeug' : `${count} Werkzeuge` })]),
         mini('up', 'Nach vorne verschieben', () => moveScreen(i, -1), i === 0),
-        mini('down', 'Nach hinten verschieben', () => moveScreen(i, 1), i === state.screens.length - 1),
+        mini('down', 'Nach hinten verschieben', () => moveScreen(i, 1), i === lesson.screens.length - 1),
         mini('copy', 'Duplizieren', () => duplicateScreen(i)),
-        mini('trash', 'Löschen', () => deleteScreen(i), state.screens.length === 1, 'del'),
+        mini('trash', 'Löschen', () => deleteScreen(i), lesson.screens.length === 1, 'del'),
       ]);
       row.addEventListener('click', e => { if (!e.target.closest('button, input')) showScreen(i); });
       return row;
     });
     screensPanel.replaceChildren(
-      el('h2', { text: 'Bildschirme' }),
+      el('h2', { text: `Bildschirme · ${lesson.name}` }),
       el('p', { class: 'sc-hint', text: 'Wie Folien einer Präsentation: Blättern mit ◀ ▶, den Pfeiltasten oder Bild↑/Bild↓ (auch mit einem Presenter).' }),
       el('ol', { class: 'sc-list' }, rows),
       el('div', { class: 'sc-foot' }, [
         el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Neuer Bildschirm</span>', onclick: addScreen }),
-        el('div', { class: 'sc-file' }, [
-          el('button', { class: 'btn', type: 'button', title: 'Alle Bildschirme als Datei speichern', html: icon('download') + '<span>Sichern</span>', onclick: doExport }),
-          el('button', { class: 'btn', type: 'button', title: 'Gesicherte Datei laden', html: icon('upload') + '<span>Laden</span>', onclick: doImport }),
-        ]),
-      ]),
-      el('p', { class: 'sc-tip', text: 'Tipp: Am Schul-PC vor dem Abmelden sichern – manche Schulrechner löschen den Browser-Speicher. Mit der Datei nimmst du deine Stunden auch nach Hause mit.' }),
-    );
-  }
-
-  /* ---------- Sichern & Laden ---------- */
-  async function doExport() {
-    try {
-      saveNow();
-      const r = await exportBackup(state);
-      toast(`Gesichert: ${r.name}`);
-    } catch (err) {
-      console.error(err);
-      toast('Sichern hat nicht geklappt.');
-    }
-  }
-
-  async function doImport() {
-    const file = await pickFile('.json,application/json');
-    if (!file) return;
-    let data;
-    try { data = await readBackup(file); } catch (err) { toast(err.message); return; }
-    const n = data.state.screens.length;
-    const when = data.exportedAt ? `, gesichert am ${new Date(data.exportedAt).toLocaleDateString('de-DE')}` : '';
-    togglePanel(panels.find(p => p.panel === screensPanel), true);
-    screensPanel.replaceChildren(
-      el('h2', { text: 'Sicherung laden' }),
-      el('p', { class: 'sc-hint', text: `„${file.name}“ enthält ${n === 1 ? '1 Bildschirm' : `${n} Bildschirme`}${when}.` }),
-      el('div', { class: 'sc-choice' }, [
-        el('button', { class: 'btn btn-primary sc-add', type: 'button', html: icon('plus') + '<span>Zu meinen Bildschirmen hinzufügen</span>', onclick: () => finishImport(data, 'add') }),
-        el('button', {
-          class: 'btn', type: 'button', html: icon('reset') + '<span>Alles ersetzen</span>',
-          onclick: () => { if (confirm('Alle aktuellen Bildschirme werden durch die Sicherung ersetzt. Fortfahren?')) finishImport(data, 'replace'); },
-        }),
-        el('button', { class: 'btn', type: 'button', text: 'Abbrechen', onclick: renderScreensPanel }),
+        el('button', { class: 'btn', type: 'button', html: icon('home') + '<span>Alle Stunden</span>', onclick: showHome }),
       ]),
     );
-  }
-
-  async function finishImport(data, mode) {
-    let next;
-    try { next = await stateFromBackup(data, state, mode); } catch (err) {
-      console.error(err);
-      toast('Die Sicherung konnte nicht geladen werden.');
-      return;
-    }
-    const newImages = next._newImages || [];
-    delete next._newImages;
-    saveSuppressed = true; // der alte Stand darf den neuen nicht mehr überschreiben
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      saveSuppressed = false;
-      newImages.forEach(id => ImageDB.del(id).catch(() => {}));
-      toast('Nicht genug Speicherplatz im Browser für diese Sicherung.');
-      return;
-    }
-    if (mode === 'replace') { // nicht mehr benötigte Bilder aufräumen
-      const keep = backupImageIds(next);
-      const all = await ImageDB.keys().catch(() => []);
-      await Promise.all(all.filter(id => !keep.has(id)).map(id => ImageDB.del(id).catch(() => {})));
-    }
-    location.reload();
   }
 
   document.addEventListener('pointerdown', e => {
@@ -655,6 +700,263 @@
     }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanels(); });
+
+  /* ---------- Startseite „Meine Stunden“ ---------- */
+  const home = $('#home');
+  let thumbBg = null;
+
+  function relTime(ts) {
+    const diff = Date.now() - ts;
+    const d = new Date(ts), today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).toDateString() === d.toDateString();
+    const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    if (diff < 60e3) return 'gerade eben';
+    if (diff < 3600e3 && sameDay) return `vor ${Math.round(diff / 60e3)} Min.`;
+    if (sameDay) return `heute, ${time}`;
+    if (yesterday) return `gestern, ${time}`;
+    return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+  }
+
+  /** Schematische Vorschau des aktuellen Bildschirms einer Stunde. */
+  function lessonThumb(l) {
+    const box = el('div', { class: 'lesson-thumb', 'aria-hidden': 'true' });
+    if (thumbBg) box.style.background = thumbBg;
+    const screen = l.screens[l.current] || l.screens[0];
+    const vw = Math.max(window.innerWidth, 480), vh = Math.max(window.innerHeight, 320);
+    const pct = v => `${(clamp(v, -1, 2) * 100).toFixed(2)}%`;
+    for (const w of [...screen.widgets].sort((a, b) => a.z - b.z)) {
+      const def = Widgets[w.type];
+      const g = fitted(w);
+      const r = el('span', { class: `lt-w lt-${w.type}` });
+      r.style.cssText = `left:${pct(g.x / vw)};top:${pct(g.y / vh)};width:${pct(g.w / vw)};height:${pct(g.h / vh)};--accent:${def.accent}`;
+      if (w.type === 'shape') {
+        const d = w.data || {};
+        r.classList.add('is-shape', `lt-kind-${d.kind}`);
+        if (d.kind === 'emoji') { r.textContent = d.symbol || '⭐'; r.style.fontSize = `${((g.h / vh) * 70).toFixed(1)}cqh`; }
+        else if (d.kind === 'callout') r.style.setProperty('--c', safeColor(d.fill, (CALLOUTS[d.callout] || CALLOUTS.merke).color));
+        else r.style.background = safeColor(d.fill, 'transparent');
+      } else {
+        r.innerHTML = icon(def.icon);
+      }
+      box.append(r);
+    }
+    return box;
+  }
+
+  function renderHome() {
+    const lessons = [...state.lessons].sort((a, b) => b.updated - a.updated);
+    const hour = new Date().getHours();
+    const greeting = hour < 11 ? 'Guten Morgen' : hour < 17 ? 'Hallo' : 'Guten Abend';
+
+    const newCard = el('article', { class: 'lesson-card lesson-new-card' });
+    const showNewButton = () => newCard.replaceChildren(el('button', {
+      class: 'lesson-new', type: 'button', html: `<span class="lesson-new-icon">${icon('plus')}</span><strong>Neue Stunde</strong><small>leer beginnen</small>`,
+      onclick: showNewForm,
+    }));
+    function showNewForm() {
+      const input = el('input', { class: 'field', type: 'text', placeholder: 'z. B. Mathe 7b – Brüche', 'aria-label': 'Name der neuen Stunde', maxlength: '80' });
+      const form = el('form', { class: 'lesson-new-form' }, [
+        el('label', { text: 'Wie heißt die Stunde?' }), input,
+        el('div', { class: 'lesson-new-actions' }, [
+          el('button', { class: 'btn btn-primary', type: 'submit', html: icon('check') + '<span>Anlegen</span>' }),
+          el('button', { class: 'btn', type: 'button', text: 'Abbrechen', onclick: showNewButton }),
+        ]),
+      ]);
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        const l = makeLesson(input.value.trim() || `Stunde ${state.lessons.length + 1}`);
+        state.lessons.push(l);
+        saveNow();
+        openLesson(l.id);
+      });
+      input.addEventListener('keydown', e => { if (e.key === 'Escape') showNewButton(); });
+      newCard.replaceChildren(form);
+      input.focus();
+    }
+    showNewButton();
+
+    home.replaceChildren(el('div', { class: 'home-inner' }, [
+      el('header', { class: 'home-head' }, [
+        el('div', {}, [
+          el('h1', { text: 'Meine Stunden' }),
+          el('p', { text: lessons.length ? `${greeting}! Wähle eine Stunde oder lege eine neue an.` : `${greeting}! Lege deine erste Stunde an – zum Beispiel für morgen früh.` }),
+        ]),
+        el('div', { class: 'home-actions' }, [
+          el('button', { class: 'btn', type: 'button', title: 'Gesicherte Datei laden', html: icon('upload') + '<span>Laden</span>', onclick: doImport }),
+          el('button', { class: 'btn', type: 'button', title: 'Alle Stunden als Datei sichern', html: icon('download') + '<span>Alles sichern</span>', onclick: () => doExport() }),
+        ]),
+      ]),
+      el('div', { class: 'home-grid' }, [newCard, ...lessons.map((l, i) => lessonCard(l, i === 0 && l.id === state.lastLesson))]),
+      el('footer', { class: 'home-foot' }, [el('p', { class: 'storage-note' })]),
+    ]));
+    renderStorageNote();
+
+    // Vorschaubilder bekommen den aktuellen Hintergrund, sobald er berechnet ist
+    backgroundThumb().then(css => {
+      thumbBg = css;
+      home.querySelectorAll('.lesson-thumb').forEach(t => { t.style.background = css; });
+    }).catch(() => {});
+  }
+
+  function lessonCard(l, isLast) {
+    const count = l.screens.length;
+    const widgets = l.screens.reduce((n, s) => n + s.widgets.length, 0);
+    const name = el('h3', { class: 'lesson-name', text: l.name });
+    const menuBtn = el('button', { class: 'mini-btn lesson-menu-btn', type: 'button', title: 'Weitere Aktionen', 'aria-label': `Weitere Aktionen für ${l.name}`, html: icon('dots') });
+    const card = el('article', { class: 'lesson-card' }, [
+      el('button', { class: 'lesson-open', type: 'button', 'aria-label': `${l.name} öffnen`, onclick: () => openLesson(l.id) }, [
+        lessonThumb(l),
+        isLast ? el('span', { class: 'lesson-badge', text: 'Zuletzt geöffnet' }) : null,
+      ]),
+      el('div', { class: 'lesson-info' }, [
+        el('div', { class: 'lesson-text' }, [
+          name,
+          el('p', { class: 'lesson-meta', text: `${count === 1 ? '1 Bildschirm' : `${count} Bildschirme`} · ${widgets} ${widgets === 1 ? 'Element' : 'Elemente'} · ${relTime(l.updated)}` }),
+        ]),
+        menuBtn,
+      ]),
+    ]);
+
+    const action = (iconName, label, fn, extra = '') => el('button', {
+      class: `lesson-action ${extra}`, type: 'button', html: icon(iconName) + `<span>${label}</span>`,
+      onclick: () => { closePopover(); fn(); },
+    });
+    menuBtn.addEventListener('click', () => openPopover(menuBtn, el('div', { class: 'lesson-menu' }, [
+      action('right', 'Öffnen', () => openLesson(l.id)),
+      action('pencil', 'Umbenennen', () => renameLesson(l, card)),
+      action('copy', 'Duplizieren', () => duplicateLesson(l)),
+      action('download', 'Als Datei sichern', () => doExport(l)),
+      action('trash', 'Löschen', () => deleteLesson(l), 'del'),
+    ]), { className: 'lesson-pop', label: `Aktionen für ${l.name}` }));
+    return card;
+  }
+
+  function renameLesson(l, card) {
+    const nameEl = card.querySelector('.lesson-name');
+    const input = el('input', { class: 'field lesson-rename', type: 'text', value: l.name, 'aria-label': 'Neuer Name', maxlength: '80' });
+    const commit = () => {
+      l.name = input.value.trim() || l.name;
+      l.updated = Date.now();
+      saveNow();
+      renderHome();
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') renderHome(); });
+    input.addEventListener('blur', commit);
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  function duplicateLesson(l) {
+    const copy = JSON.parse(JSON.stringify(l));
+    copy.id = uid();
+    copy.name = `${l.name} (Kopie)`;
+    copy.created = copy.updated = Date.now();
+    copy.screens.forEach(s => { s.id = uid(); s.widgets.forEach(w => { w.id = uid(); }); });
+    state.lessons.push(copy);
+    saveNow();
+    renderHome();
+    toast(`„${copy.name}“ angelegt.`);
+  }
+
+  function deleteLesson(l) {
+    const widgets = l.screens.reduce((n, s) => n + s.widgets.length, 0);
+    if (!confirm(`„${l.name}“ löschen?${widgets ? ` Alle ${widgets} Elemente darin gehen verloren.` : ''}\n\nTipp: Vorher „Als Datei sichern“, dann lässt sie sich wiederherstellen.`)) return;
+    state.lessons = state.lessons.filter(x => x !== l);
+    l.screens.forEach(s => s.widgets.forEach(w => releaseImage(w.data?.imageId)));
+    if (state.lastLesson === l.id) state.lastLesson = state.lessons[0]?.id || null;
+    saveNow();
+    renderHome();
+  }
+
+  function renderStorageNote() {
+    const note = home?.querySelector('.storage-note');
+    if (!note) return;
+    note.className = 'storage-note' + (persisted ? ' is-safe' : '');
+    note.innerHTML = persisted
+      ? `${icon('check')}<span><strong>Dauerhaft gespeichert</strong> in diesem Browser. Für einen anderen Rechner (z. B. Schule ↔ Zuhause) „Alles sichern“ und dort „Laden“.</span>`
+      : `${icon('check')}<span><strong>Automatisch gespeichert</strong> in diesem Browser. Am Schul-PC vor dem Abmelden „Alles sichern“ – manche Schulrechner löschen den Browser-Speicher.</span>`;
+  }
+
+  /* ---------- Sichern & Laden ---------- */
+  async function doExport(only) {
+    try {
+      saveNow();
+      const r = await exportBackup(state, only ? { lessons: [only], label: only.name } : {});
+      toast(`Gesichert: ${r.name}`);
+    } catch (err) {
+      console.error(err);
+      toast('Sichern hat nicht geklappt.');
+    }
+  }
+
+  function showDialog(title, text, buttons) {
+    const backdrop = el('div', { class: 'dialog-backdrop' });
+    const close = () => backdrop.remove();
+    backdrop.append(el('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, [
+      el('h2', { text: title }),
+      el('p', { text }),
+      el('div', { class: 'dialog-actions' }, buttons.map(b => el('button', {
+        class: `btn ${b.primary ? 'btn-primary' : ''}`, type: 'button', html: (b.icon ? icon(b.icon) : '') + `<span>${b.label}</span>`,
+        onclick: () => { close(); b.onclick?.(); },
+      }))),
+    ]));
+    backdrop.addEventListener('pointerdown', e => { if (e.target === backdrop) close(); });
+    backdrop.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    document.body.append(backdrop);
+    backdrop.querySelector('.btn')?.focus();
+  }
+
+  async function doImport() {
+    const file = await pickFile('.json,application/json');
+    if (!file) return;
+    let data;
+    try { data = await readBackup(file); } catch (err) { toast(err.message); return; }
+    const n = data.state.lessons.length;
+    const screens = data.state.lessons.reduce((s, l) => s + (l.screens?.length || 0), 0);
+    const when = data.exportedAt ? ` Gesichert am ${new Date(data.exportedAt).toLocaleDateString('de-DE')}.` : '';
+    showDialog('Sicherung laden',
+      `„${file.name}“ enthält ${n === 1 ? '1 Stunde' : `${n} Stunden`} mit ${screens === 1 ? '1 Bildschirm' : `${screens} Bildschirmen`}.${when}`,
+      [
+        { label: 'Zu meinen Stunden hinzufügen', icon: 'plus', primary: true, onclick: () => finishImport(data, 'add') },
+        {
+          label: 'Alles ersetzen', icon: 'reset',
+          onclick: () => { if (confirm('Alle aktuellen Stunden werden durch die Sicherung ersetzt. Fortfahren?')) finishImport(data, 'replace'); },
+        },
+        { label: 'Abbrechen' },
+      ]);
+  }
+
+  async function finishImport(data, mode) {
+    let result;
+    try { result = await stateFromBackup(data, state, mode); } catch (err) {
+      console.error(err);
+      toast('Die Sicherung konnte nicht geladen werden.');
+      return;
+    }
+    const before = JSON.stringify(state);
+    Object.assign(state, result.state);
+    state.lessons = state.lessons.map(normalizeLesson);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      Object.assign(state, JSON.parse(before));
+      result.newImages.forEach(id => ImageDB.del(id).catch(() => {}));
+      toast('Nicht genug Speicherplatz im Browser für diese Sicherung.');
+      return;
+    }
+    if (mode === 'replace') { // nicht mehr benötigte Bilder aufräumen
+      const keep = backupImageIds(state);
+      const all = await ImageDB.keys().catch(() => []);
+      await Promise.all(all.filter(id => !keep.has(id)).map(id => ImageDB.del(id).catch(() => {})));
+      buildPanel();
+      buildCollabPanel(collabPanel, { state, save, addWidget: add, close: closePanels });
+      applyBackground();
+    }
+    renderHome();
+    toast(mode === 'add' ? `${result.added === 1 ? '1 Stunde' : `${result.added} Stunden`} hinzugefügt.` : 'Sicherung geladen.');
+  }
 
   /* ---------- Vollbild: Leiste blendet sich bei Ruhe aus ---------- */
   function toggleFullscreen() {
@@ -666,7 +968,7 @@
   function wake() {
     document.body.classList.remove('idle');
     clearTimeout(idleTimer);
-    if (document.fullscreenElement && panels.every(p => p.panel.hidden)) {
+    if (document.fullscreenElement && lesson && panels.every(p => p.panel.hidden)) {
       idleTimer = setTimeout(() => document.body.classList.add('idle'), 3000);
     }
   }
@@ -679,7 +981,7 @@
 
   /* ---------- Bild aus der Zwischenablage einfügen (Strg+V) ---------- */
   document.addEventListener('paste', e => {
-    if (e.target.closest?.('[contenteditable], input, textarea')) return;
+    if (!lesson || e.target.closest?.('[contenteditable], input, textarea')) return;
     const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
     if (!item) return;
     e.preventDefault();
@@ -690,12 +992,11 @@
   // Ton freischalten, sobald jemand mit der Seite interagiert (Browser-Regel)
   document.addEventListener('pointerdown', () => Sound.unlock(), { once: true });
 
-  /* ---------- Start ---------- */
+  /* ---------- Start: immer mit der Startseite ---------- */
   buildDock();
   buildPanel();
   buildCollabPanel(collabPanel, { state, save, addWidget: add, close: closePanels });
   buildShapesPanel(shapesPanel, { addWidget: add, close: closePanels });
   applyBackground();
-  for (const screen of state.screens) screen.widgets.forEach(w => mount(w, screen));
-  showScreen(state.current, { announce: false });
+  showHome();
 })();

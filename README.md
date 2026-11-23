@@ -15,7 +15,12 @@ Läuft komplett im Browser, ohne Konto, ohne Server, ohne Werbung.
 | **Bild** | Bild auswählen, hineinziehen oder einfach **Strg+V** auf der Fläche |
 | **QR-Code** | Link eingeben (optional mit Überschrift) → Schüler*innen scannen mit dem Tablet |
 
-**Mehrere Bildschirme (wie Folien):** Unten links ◀ 2 / 5 ▶. Ein Klick auf die Zahl öffnet die Übersicht
+**Startseite „Meine Stunden“:** Beim Öffnen erscheint zuerst die Übersicht aller Stunden
+(z. B. „Mathe 7b – Brüche“) mit Vorschaubild, Anzahl der Bildschirme und „zuletzt bearbeitet“.
+Klick öffnet eine Stunde; über ⋯ lässt sie sich umbenennen, duplizieren, einzeln als Datei sichern oder löschen.
+Der Knopf **Übersicht** in der Leiste führt zurück.
+
+**Mehrere Bildschirme (wie Folien):** Jede Stunde hat eigene Bildschirme. Unten links ◀ 2 / 5 ▶. Ein Klick auf die Zahl öffnet die Übersicht
 (neu, duplizieren, umbenennen, sortieren, löschen). Blättern mit ◀ ▶, Pfeiltasten oder Bild↑/Bild↓ –
 funktioniert also auch mit einem Präsentations-Presenter. Werkzeuge auf anderen Bildschirmen laufen weiter
 (ein Timer gongt auch, wenn gerade ein anderer Bildschirm gezeigt wird).
@@ -44,10 +49,14 @@ Alle Werkzeuge lassen sich an der Kopfzeile verschieben und an der unteren recht
 Alles wird automatisch im Browser gespeichert – nach dem Neuladen ist der Bildschirm wieder genau so da, auch ein laufender Timer.
 
 > Hinweis: Gespeichert wird **pro Browser und Gerät**. Am Schul-PC und zu Hause sind es also zwei getrennte Stände.
-> Deshalb gibt es **Sichern & Laden** (Bildschirm-Übersicht, Klick auf die Zahl unten links):
-> „Sichern“ speichert alle Bildschirme samt Bildern als eine `.json`-Datei (USB-Stick, Schul-Cloud).
-> „Laden“ holt sie zurück – wahlweise **zusätzlich** zu den vorhandenen Bildschirmen oder als **Ersatz**.
+> Deshalb gibt es auf der Startseite **Alles sichern** und **Laden**:
+> „Alles sichern“ speichert alle Stunden samt Bildern als eine `.json`-Datei (USB-Stick, Schul-Cloud),
+> über ⋯ → „Als Datei sichern“ auch einzelne Stunden (z. B. zum Weitergeben an Kolleg*innen).
+> „Laden“ holt sie zurück – wahlweise **zusätzlich** zu den vorhandenen Stunden oder als **Ersatz**.
 > Viele Schulrechner löschen den Browser-Speicher beim Abmelden: dort also vor dem Abmelden sichern.
+>
+> Jede Änderung wird sofort gespeichert (kurze Anzeige „✓ Gespeichert“ unten links; scheitert das Speichern,
+> erscheint dort eine rote Warnung). Die Seite bittet den Browser außerdem, die Daten dauerhaft zu behalten.
 
 ## Lokal ausprobieren
 
